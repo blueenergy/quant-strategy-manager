@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quant-strategy-manager"
+version = "0.1.0"
+description = "Engine-agnostic strategy orchestration library for quantitative trading"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Shuyong Lin", email = "steven.linsy@gmail.com"}
+]
+keywords = ["trading", "quantitative", "strategy", "backtrader", "vnpy"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+
+dependencies = [
+    "pymongo>=4.0.0",
+    "python-dateutil>=2.8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=22.0",
+    "flake8>=5.0",
+    "mypy>=0.990",
+]
+
+vnpy = [
+    "vnpy>=3.0.0",
+]
+
+backtrader = [
+    "backtrader>=1.9.76",
+]
+
+all = [
+    "vnpy>=3.0.0",
+    "backtrader>=1.9.76",
+]
+
+[project.urls]
+Homepage = "https://github.com/blue_energy/quant-strategy-manager"
+Repository = "https://github.com/blue_energy/quant-strategy-manager"
+Documentation = "https://quant-strategy-manager.readthedocs.io"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ['py39', 'py310', 'py311']
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

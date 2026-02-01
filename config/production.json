@@ -1,0 +1,38 @@
+{
+  "comment": "Strategy Manager Configuration - Shared across projects",
+  
+  "mongo_uri": "mongodb://localhost:27017",
+  "mongo_db": "finance",
+  "config_collection": "watchlist_strategies",
+  
+  "auto_reload_interval": 60,
+  "enable_lifecycle": true,
+  
+  "lifecycle": {
+    "auto_start": true,
+    "auto_stop": true,
+    "check_interval_sec": 30
+  },
+  
+  "engines": {
+    "vnpy": {
+      "enabled": true,
+      "description": "Vnpy real-time engine for minute-level strategies"
+    },
+    "backtrader": {
+      "enabled": false,
+      "description": "Backtrader engine for backtesting and live trading"
+    }
+  },
+  
+  "import_paths": [
+    "/home/shuyolin/own/vnpy-live-trading"
+  ],
+  
+  "log_level": "INFO",
+  
+  "monitoring": {
+    "enabled": false,
+    "prometheus_port": 9090
+  }
+}

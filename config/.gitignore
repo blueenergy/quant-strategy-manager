@@ -1,0 +1,13 @@
+# config/.gitignore - only keep local/sensitive config patterns here
+
+# Local environment overrides (should not be committed)
+.env
+.env.local
+.env.*.local
+
+# Keep example files tracked
+!.env.example
+!production.json.example
+
+# production.json (non-sensitive defaults) should be tracked by repo
+!production.json
