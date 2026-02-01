@@ -6,8 +6,12 @@ Wraps vnpy RealTimeEngine to conform to StrategyWorker interface.
 import logging
 from typing import Dict, Any, Optional
 import importlib
+from pathlib import Path
+from logging.handlers import RotatingFileHandler
 
 from ..core.strategy_worker import StrategyWorker, WorkerState
+from ..log_stream_server import LogStreamServer
+from ..log_handlers import WebSocketLogHandler
 
 
 class VnpyWorkerAdapter(StrategyWorker):
@@ -76,13 +80,89 @@ class VnpyWorkerAdapter(StrategyWorker):
             strategy_params=params
         )
         
+        # Setup logging with WebSocket streaming support and file logging
         self.log = logging.getLogger(f"VnpyWorker[{symbol}]")
+        self.log.propagate = False  # Avoid duplicate logs
+        
+        # Create logs directory (use vnpy-live-trading as project root)
+        # Try to find vnpy-live-trading directory
+        current_file = Path(__file__)
+        vnpy_root = None
+        
+        # Search upwards for vnpy-live-trading directory
+        for parent in [current_file] + list(current_file.parents):
+            vnpy_dir = parent.parent / "vnpy-live-trading"
+            if vnpy_dir.exists() and vnpy_dir.is_dir():
+                vnpy_root = vnpy_dir
+                break
+        
+        # Fallback: use current directory's parent
+        if not vnpy_root:
+            vnpy_root = current_file.parent.parent.parent.parent / "vnpy-live-trading"
+        
+        log_dir = vnpy_root / "logs" / "workers"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Log file path (one file per worker) - use worker_key from parent class
+        log_filename = f"{user_id or 'unknown'}_{symbol}_{strategy_key}.log"
+        self.log_file = log_dir / log_filename
+        
         if not self.log.handlers:
-            h = logging.StreamHandler()
             fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-            h.setFormatter(fmt)
-            self.log.addHandler(h)
+            
+            # Console handler
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(fmt)
+            self.log.addHandler(console_handler)
+            
+            # File handler (rotating, max 10MB per file, keep 5 backups)
+            try:
+                file_handler = RotatingFileHandler(
+                    self.log_file,
+                    maxBytes=10*1024*1024,  # 10MB
+                    backupCount=5,
+                    encoding='utf-8'
+                )
+                file_handler.setFormatter(fmt)
+                self.log.addHandler(file_handler)
+                self.log.info(f"Logging to file: {self.log_file}")
+            except Exception as e:
+                self.log.warning(f"Failed to setup file logging: {e}")
+            
+            # WebSocket log streaming (dynamic port)
+            try:
+                self._log_server = LogStreamServer(host="0.0.0.0", port=0)
+                self._log_server.start()
+                
+                ws_handler = WebSocketLogHandler(self._log_server)
+                ws_handler.setFormatter(fmt)
+                self.log.addHandler(ws_handler)
+                
+                self.log.info(f"Log stream available at {self.get_log_stream_url()}")
+            except Exception as e:
+                self.log.warning(f"Failed to start log stream server: {e}")
+                self._log_server = None
+        
         self.log.setLevel(logging.INFO)
+        
+        # 🔗 连接 vnpy 引擎的 logger 到 Worker 的日志处理器
+        # vnpy 引擎内部有自己的 logger，需要将 Worker 的文件/WebSocket handler 也添加进去
+        # 这样引擎内部的日志（市场数据、交易信号）才会写入文件
+        if hasattr(self.engine, 'logger') and isinstance(self.engine.logger, logging.Logger):
+            vnpy_logger = self.engine.logger
+            
+            # 将 Worker 的所有 handler 复制到 vnpy logger
+            for handler in self.log.handlers:
+                # 避免重复添加
+                if handler not in vnpy_logger.handlers:
+                    vnpy_logger.addHandler(handler)
+            
+            # 确保日志级别一致
+            vnpy_logger.setLevel(self.log.level)
+            
+            self.log.info(f"✓ Linked vnpy engine logger to Worker handlers ({len(self.log.handlers)} handlers)")
+        else:
+            self.log.warning("⚠️ vnpy engine does not have a logger attribute, engine logs may not be captured")
         
         self.bars_processed = 0
     
@@ -115,6 +195,14 @@ class VnpyWorkerAdapter(StrategyWorker):
             self.save_state()
         
         self.engine.stop()
+        
+        # Stop log stream server
+        if self._log_server:
+            try:
+                self._log_server.stop()
+            except Exception as e:
+                self.log.warning(f"Error stopping log stream server: {e}")
+        
         self._state = WorkerState.STOPPED
     
     def get_stats(self) -> Dict[str, Any]:

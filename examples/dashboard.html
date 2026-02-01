@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Worker Console Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 28px;
+        }
+        
+        .workers-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .worker-card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .worker-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .worker-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+        
+        .worker-status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .worker-status.connected {
+            background-color: rgba(76, 175, 80, 0.9);
+        }
+        
+        .worker-status.disconnected {
+            background-color: rgba(244, 67, 54, 0.9);
+        }
+        
+        .worker-controls {
+            padding: 12px 20px;
+            background: #fafafa;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            gap: 8px;
+        }
+        
+        .btn {
+            padding: 6px 14px;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+        
+        .btn-connect {
+            background-color: #4CAF50;
+            color: white;
+        }
+        
+        .btn-connect:hover {
+            background-color: #45a049;
+        }
+        
+        .btn-disconnect {
+            background-color: #f44336;
+            color: white;
+        }
+        
+        .btn-disconnect:hover {
+            background-color: #da190b;
+        }
+        
+        .btn-clear {
+            background-color: #9e9e9e;
+            color: white;
+        }
+        
+        .btn-clear:hover {
+            background-color: #757575;
+        }
+        
+        .worker-console {
+            background-color: #1e1e1e;
+            height: 400px;
+            overflow-y: auto;
+            padding: 15px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            color: #d4d4d4;
+        }
+        
+        .log-entry {
+            padding: 3px 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        
+        .log-timestamp {
+            color: #858585;
+            margin-right: 8px;
+        }
+        
+        .log-level {
+            display: inline-block;
+            width: 55px;
+            font-weight: 600;
+            margin-right: 8px;
+        }
+        
+        .log-level.DEBUG { color: #b5cea8; }
+        .log-level.INFO { color: #4fc1ff; }
+        .log-level.WARNING { color: #dcdcaa; }
+        .log-level.ERROR { color: #f48771; }
+        .log-level.CRITICAL { color: #f14c4c; }
+        
+        .log-message {
+            color: #d4d4d4;
+        }
+        
+        .system-message {
+            color: #858585;
+            font-style: italic;
+            padding: 8px 0;
+        }
+        
+        .worker-console::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .worker-console::-webkit-scrollbar-track {
+            background: #1e1e1e;
+        }
+        
+        .worker-console::-webkit-scrollbar-thumb {
+            background: #424242;
+            border-radius: 4px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+        
+        .error-message {
+            background-color: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Strategy Workers Console Dashboard</h1>
+        
+        <div id="error-container"></div>
+        <div id="loading" class="loading">正在加载 Workers...</div>
+        <div id="workers-grid" class="workers-grid" style="display: none;"></div>
+    </div>
+
+    <script>
+        // API endpoint (可配置)
+        const API_BASE = 'http://localhost:5000/api';
+        
+        const workers = new Map();
+        
+        // 加载 Workers 列表
+        async function loadWorkers() {
+            try {
+                const response = await fetch(`${API_BASE}/workers`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('workers-grid').style.display = 'grid';
+                
+                renderWorkers(data.workers);
+            } catch (error) {
+                document.getElementById('loading').style.display = 'none';
+                showError(`无法加载 Workers: ${error.message}`);
+            }
+        }
+        
+        function showError(message) {
+            const errorContainer = document.getElementById('error-container');
+            errorContainer.innerHTML = `
+                <div class="error-message">
+                    ❌ ${message}
+                    <br><br>
+                    <small>请确保 API 服务器正在运行: <code>python examples/api_with_log_streaming.py</code></small>
+                </div>
+            `;
+        }
+        
+        function renderWorkers(workersData) {
+            const grid = document.getElementById('workers-grid');
+            grid.innerHTML = '';
+            
+            for (const [key, worker] of Object.entries(workersData)) {
+                const card = createWorkerCard(key, worker);
+                grid.appendChild(card);
+            }
+        }
+        
+        function createWorkerCard(key, worker) {
+            const card = document.createElement('div');
+            card.className = 'worker-card';
+            card.id = `worker-${key}`;
+            
+            const stats = worker.stats || {};
+            const wsUrl = worker.log_stream_url || '';
+            
+            card.innerHTML = `
+                <div class="worker-header">
+                    <div>
+                        <div class="worker-title">${stats.symbol || key}</div>
+                        <div style="font-size: 12px; opacity: 0.9; margin-top: 4px;">
+                            策略: ${stats.strategy || 'N/A'} | 持仓: ${stats.position || 0}
+                        </div>
+                    </div>
+                    <span class="worker-status disconnected" id="status-${key}">DISCONNECTED</span>
+                </div>
+                <div class="worker-controls">
+                    <button class="btn btn-connect" onclick="connectWorker('${key}', '${wsUrl}')">连接</button>
+                    <button class="btn btn-disconnect" onclick="disconnectWorker('${key}')">断开</button>
+                    <button class="btn btn-clear" onclick="clearWorkerConsole('${key}')">清空</button>
+                </div>
+                <div class="worker-console" id="console-${key}">
+                    <div class="system-message">等待连接到 ${wsUrl}...</div>
+                </div>
+            `;
+            
+            return card;
+        }
+        
+        function connectWorker(key, wsUrl) {
+            if (!wsUrl) {
+                addSystemMessage(key, '错误: 没有可用的 WebSocket URL', 'error');
+                return;
+            }
+            
+            // 断开已有连接
+            if (workers.has(key)) {
+                disconnectWorker(key);
+            }
+            
+            addSystemMessage(key, `正在连接到 ${wsUrl}...`, 'info');
+            
+            const ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                updateStatus(key, true);
+                addSystemMessage(key, `✅ 已连接`, 'success');
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const logData = JSON.parse(event.data);
+                    addLogEntry(key, logData);
+                } catch (e) {
+                    console.error('解析日志失败:', e);
+                }
+            };
+            
+            ws.onerror = (error) => {
+                addSystemMessage(key, `❌ 连接错误`, 'error');
+            };
+            
+            ws.onclose = () => {
+                updateStatus(key, false);
+                addSystemMessage(key, '连接已关闭', 'warning');
+                workers.delete(key);
+            };
+            
+            workers.set(key, { ws, autoScroll: true });
+        }
+        
+        function disconnectWorker(key) {
+            const worker = workers.get(key);
+            if (worker && worker.ws) {
+                worker.ws.close();
+                workers.delete(key);
+            }
+        }
+        
+        function clearWorkerConsole(key) {
+            const consoleEl = document.getElementById(`console-${key}`);
+            if (consoleEl) {
+                consoleEl.innerHTML = '';
+            }
+        }
+        
+        function updateStatus(key, connected) {
+            const statusEl = document.getElementById(`status-${key}`);
+            if (statusEl) {
+                statusEl.textContent = connected ? 'CONNECTED' : 'DISCONNECTED';
+                statusEl.className = `worker-status ${connected ? 'connected' : 'disconnected'}`;
+            }
+        }
+        
+        function addLogEntry(key, logData) {
+            const consoleEl = document.getElementById(`console-${key}`);
+            if (!consoleEl) return;
+            
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            
+            const timestamp = document.createElement('span');
+            timestamp.className = 'log-timestamp';
+            timestamp.textContent = formatTimestamp(logData.timestamp);
+            
+            const level = document.createElement('span');
+            level.className = `log-level ${logData.level}`;
+            level.textContent = logData.level;
+            
+            const message = document.createElement('span');
+            message.className = 'log-message';
+            message.textContent = logData.message;
+            
+            entry.appendChild(timestamp);
+            entry.appendChild(level);
+            entry.appendChild(message);
+            
+            consoleEl.appendChild(entry);
+            
+            // Auto-scroll
+            const worker = workers.get(key);
+            if (worker && worker.autoScroll) {
+                consoleEl.scrollTop = consoleEl.scrollHeight;
+            }
+        }
+        
+        function addSystemMessage(key, text, type = 'info') {
+            const consoleEl = document.getElementById(`console-${key}`);
+            if (!consoleEl) return;
+            
+            const entry = document.createElement('div');
+            entry.className = 'system-message';
+            
+            if (type === 'success') {
+                entry.style.color = '#4CAF50';
+            } else if (type === 'error') {
+                entry.style.color = '#f44336';
+            } else if (type === 'warning') {
+                entry.style.color = '#ff9800';
+            }
+            
+            entry.textContent = `[系统] ${text}`;
+            consoleEl.appendChild(entry);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+        
+        function formatTimestamp(isoString) {
+            const date = new Date(isoString);
+            return date.toLocaleTimeString('zh-CN', { 
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+        
+        // 页面加载时自动获取 Workers
+        loadWorkers();
+        
+        // 每 30 秒刷新一次 Workers 列表（检测新增/删除）
+        setInterval(loadWorkers, 30000);
+    </script>
+</body>
+</html>

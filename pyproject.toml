@@ -37,6 +37,12 @@ dev = [
     "mypy>=0.990",
 ]
 
+# 新增：API 服务器依赖
+api = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+]
+
 vnpy = [
     "vnpy>=3.0.0",
 ]
@@ -48,6 +54,8 @@ backtrader = [
 all = [
     "vnpy>=3.0.0",
     "backtrader>=1.9.76",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
 ]
 
 [project.urls]

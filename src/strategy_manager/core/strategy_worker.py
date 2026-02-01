@@ -5,9 +5,12 @@ regardless of underlying execution engine (backtrader, vnpy, etc.)
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, TYPE_CHECKING
 from enum import Enum
 import threading
+
+if TYPE_CHECKING:
+    from ..log_stream_server import LogStreamServer
 
 
 class WorkerState(Enum):
@@ -25,6 +28,8 @@ class StrategyWorker(ABC, threading.Thread):
     
     Provides a unified interface for different execution engines.
     Each concrete implementation wraps a specific engine (backtrader, vnpy, etc.)
+    
+    Each worker can optionally expose a WebSocket log stream for real-time monitoring.
     """
     
     def __init__(
@@ -40,6 +45,9 @@ class StrategyWorker(ABC, threading.Thread):
         self.user_id = user_id
         self._state = WorkerState.CREATED
         self._stop_event = threading.Event()
+        
+        # Log streaming support (optional, initialized by subclass)
+        self._log_server: Optional['LogStreamServer'] = None
     
     @abstractmethod
     def run(self):
@@ -92,10 +100,28 @@ class StrategyWorker(ABC, threading.Thread):
     
     def get_worker_info(self) -> Dict[str, Any]:
         """Get worker metadata."""
-        return {
+        info = {
             "symbol": self.symbol,
             "strategy_key": self.strategy_key,
             "user_id": self.user_id,
             "state": self._state.value,
             "thread_alive": self.is_alive(),
         }
+        
+        # Add log stream URL if available
+        log_url = self.get_log_stream_url()
+        if log_url:
+            info["log_stream_url"] = log_url
+        
+        return info
+    
+    def get_log_stream_url(self) -> Optional[str]:
+        """Get WebSocket URL for real-time log streaming.
+        
+        Returns:
+            WebSocket URL (e.g., "ws://localhost:8765") or None if not enabled
+        """
+        if self._log_server:
+            host, port = self._log_server.get_address()
+            return f"ws://{host}:{port}"
+        return None

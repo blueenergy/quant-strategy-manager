@@ -311,7 +311,8 @@ class MultiStrategyOrchestrator:
             "workers": {
                 key: {
                     "alive": worker.is_alive(),
-                    "stats": worker.get_stats()
+                    "stats": worker.get_stats(),
+                    "log_stream_url": worker.get_log_stream_url(),
                 }
                 for key, worker in self.workers.items()
             }

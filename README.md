@@ -147,6 +147,72 @@ Store strategy configurations in MongoDB:
 }
 ```
 
+## Real-Time Log Streaming 🔥
+
+Each worker exposes a **WebSocket console output** (like Jenkins) for real-time log monitoring - **no database writes needed**!
+
+### How It Works
+
+```
+┌─────────────────────────────────────┐
+│  StrategyWorker (002050.SZ)         │
+│  • Runs strategy logic              │
+│  • Logs to console + WebSocket      │
+│  • ws://localhost:8765 (dynamic)    │
+└─────────────────────────────────────┘
+         │ WebSocket
+         ↓
+┌─────────────────────────────────────┐
+│  Browser (log_viewer.html)          │
+│  • Real-time log output             │
+│  • Color-coded by level             │
+│  • No database needed               │
+└─────────────────────────────────────┘
+```
+
+### Usage
+
+```python
+# Start strategy manager
+python -m strategy_manager.cli start
+
+# Get worker status (includes WebSocket URLs)
+orchestrator.get_status()
+# {
+#   "workers": {
+#     "user123_002050.SZ_hidden_dragon": {
+#       "log_stream_url": "ws://localhost:54321",
+#       ...
+#     }
+#   }
+# }
+```
+
+### View Logs in Browser
+
+1. Open `examples/log_viewer.html` in browser
+2. Enter WebSocket URL (e.g., `ws://localhost:54321`)
+3. Click "连接" to see real-time logs
+
+**Features:**
+- ✅ Real-time streaming (no database writes)
+- ✅ Color-coded log levels (DEBUG/INFO/WARNING/ERROR)
+- ✅ Auto-scroll with manual override
+- ✅ Independent console per worker
+- ✅ Similar to Jenkins console output
+
+### Test It
+
+```bash
+# Single worker test
+python examples/test_log_streaming.py
+
+# Multi-worker test
+python examples/test_log_streaming.py multi
+```
+
+Then open `examples/log_viewer.html` in your browser.
+
 ## Custom Engine Adapter
 
 Easily add support for new engines:

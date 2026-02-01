@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Strategy Worker Console Output</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: #4ec9b0;
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+        
+        .controls {
+            background-color: #252526;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        label {
+            color: #cccccc;
+            font-size: 14px;
+        }
+        
+        input[type="text"] {
+            flex: 1;
+            min-width: 300px;
+            padding: 8px 12px;
+            background-color: #3c3c3c;
+            border: 1px solid #555;
+            color: #d4d4d4;
+            border-radius: 3px;
+            font-family: inherit;
+            font-size: 14px;
+        }
+        
+        button {
+            padding: 8px 20px;
+            background-color: #0e639c;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        
+        button:hover {
+            background-color: #1177bb;
+        }
+        
+        button.disconnect {
+            background-color: #c72e0f;
+        }
+        
+        button.disconnect:hover {
+            background-color: #e03e1f;
+        }
+        
+        button.clear {
+            background-color: #5a5a5a;
+        }
+        
+        button.clear:hover {
+            background-color: #6a6a6a;
+        }
+        
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .status.connected {
+            background-color: #0e7a0d;
+            color: white;
+        }
+        
+        .status.disconnected {
+            background-color: #a1260d;
+            color: white;
+        }
+        
+        .console {
+            background-color: #1e1e1e;
+            border: 1px solid #3c3c3c;
+            border-radius: 5px;
+            height: calc(100vh - 200px);
+            overflow-y: auto;
+            padding: 15px;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        
+        .log-entry {
+            padding: 4px 0;
+            border-bottom: 1px solid #2d2d30;
+        }
+        
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+        
+        .log-timestamp {
+            color: #858585;
+            margin-right: 10px;
+        }
+        
+        .log-level {
+            display: inline-block;
+            width: 60px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .log-level.DEBUG {
+            color: #b5cea8;
+        }
+        
+        .log-level.INFO {
+            color: #4fc1ff;
+        }
+        
+        .log-level.WARNING {
+            color: #dcdcaa;
+        }
+        
+        .log-level.ERROR {
+            color: #f48771;
+        }
+        
+        .log-level.CRITICAL {
+            color: #f14c4c;
+            font-weight: bold;
+        }
+        
+        .log-message {
+            color: #d4d4d4;
+        }
+        
+        .log-logger {
+            color: #4ec9b0;
+            margin-right: 10px;
+        }
+        
+        .console::-webkit-scrollbar {
+            width: 10px;
+        }
+        
+        .console::-webkit-scrollbar-track {
+            background: #1e1e1e;
+        }
+        
+        .console::-webkit-scrollbar-thumb {
+            background: #424242;
+            border-radius: 5px;
+        }
+        
+        .console::-webkit-scrollbar-thumb:hover {
+            background: #4e4e4e;
+        }
+        
+        .info-box {
+            background-color: #252526;
+            padding: 10px 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            font-size: 12px;
+            color: #cccccc;
+        }
+        
+        .info-box code {
+            background-color: #1e1e1e;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #ce9178;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Strategy Worker Console Output</h1>
+        
+        <div class="info-box">
+            💡 <strong>类似 Jenkins Console Output</strong> - 实时查看策略运行日志，无需写入数据库
+        </div>
+        
+        <div class="controls">
+            <label for="wsUrl">WebSocket URL:</label>
+            <input type="text" id="wsUrl" placeholder="ws://localhost:8765" 
+                   value="ws://localhost:">
+            <span class="status disconnected" id="status">DISCONNECTED</span>
+            <button onclick="connect()">连接</button>
+            <button class="disconnect" onclick="disconnect()">断开</button>
+            <button class="clear" onclick="clearConsole()">清空</button>
+        </div>
+        
+        <div class="console" id="console">
+            <div style="color: #858585; font-style: italic;">
+                等待连接到 Worker 日志流...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let autoScroll = true;
+        
+        const consoleEl = document.getElementById('console');
+        const statusEl = document.getElementById('status');
+        const wsUrlInput = document.getElementById('wsUrl');
+        
+        // Auto-scroll detection
+        consoleEl.addEventListener('scroll', () => {
+            const threshold = 50;
+            const position = consoleEl.scrollHeight - consoleEl.scrollTop - consoleEl.clientHeight;
+            autoScroll = position < threshold;
+        });
+        
+        function connect() {
+            const url = wsUrlInput.value.trim();
+            
+            if (!url) {
+                alert('请输入 WebSocket URL');
+                return;
+            }
+            
+            if (ws) {
+                ws.close();
+            }
+            
+            addSystemMessage(`正在连接到 ${url}...`);
+            
+            ws = new WebSocket(url);
+            
+            ws.onopen = () => {
+                statusEl.textContent = 'CONNECTED';
+                statusEl.className = 'status connected';
+                addSystemMessage(`✅ 已连接到 ${url}`, 'success');
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const logData = JSON.parse(event.data);
+                    addLogEntry(logData);
+                } catch (e) {
+                    console.error('Failed to parse log message:', e);
+                }
+            };
+            
+            ws.onerror = (error) => {
+                addSystemMessage(`❌ WebSocket 错误: ${error.message || '连接失败'}`, 'error');
+            };
+            
+            ws.onclose = () => {
+                statusEl.textContent = 'DISCONNECTED';
+                statusEl.className = 'status disconnected';
+                addSystemMessage('连接已关闭', 'warning');
+                ws = null;
+            };
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+        
+        function clearConsole() {
+            consoleEl.innerHTML = '';
+        }
+        
+        function addLogEntry(logData) {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            
+            const timestamp = document.createElement('span');
+            timestamp.className = 'log-timestamp';
+            timestamp.textContent = formatTimestamp(logData.timestamp);
+            
+            const level = document.createElement('span');
+            level.className = `log-level ${logData.level}`;
+            level.textContent = logData.level;
+            
+            const logger = document.createElement('span');
+            logger.className = 'log-logger';
+            logger.textContent = logData.logger_name;
+            
+            const message = document.createElement('span');
+            message.className = 'log-message';
+            message.textContent = logData.message;
+            
+            entry.appendChild(timestamp);
+            entry.appendChild(level);
+            entry.appendChild(logger);
+            entry.appendChild(message);
+            
+            consoleEl.appendChild(entry);
+            
+            if (autoScroll) {
+                consoleEl.scrollTop = consoleEl.scrollHeight;
+            }
+        }
+        
+        function addSystemMessage(text, type = 'info') {
+            const entry = document.createElement('div');
+            entry.style.padding = '8px 0';
+            entry.style.fontStyle = 'italic';
+            
+            if (type === 'success') {
+                entry.style.color = '#4ec9b0';
+            } else if (type === 'error') {
+                entry.style.color = '#f48771';
+            } else if (type === 'warning') {
+                entry.style.color = '#dcdcaa';
+            } else {
+                entry.style.color = '#858585';
+            }
+            
+            entry.textContent = `[系统] ${text}`;
+            consoleEl.appendChild(entry);
+            
+            if (autoScroll) {
+                consoleEl.scrollTop = consoleEl.scrollHeight;
+            }
+        }
+        
+        function formatTimestamp(isoString) {
+            const date = new Date(isoString);
+            return date.toLocaleTimeString('zh-CN', { 
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'l') {
+                e.preventDefault();
+                clearConsole();
+            }
+        });
+        
+        // Load saved URL
+        const savedUrl = localStorage.getItem('wsUrl');
+        if (savedUrl) {
+            wsUrlInput.value = savedUrl;
+        }
+        
+        // Save URL on change
+        wsUrlInput.addEventListener('change', () => {
+            localStorage.setItem('wsUrl', wsUrlInput.value);
+        });
+    </script>
+</body>
+</html>
