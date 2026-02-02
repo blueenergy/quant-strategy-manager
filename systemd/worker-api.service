@@ -1,0 +1,49 @@
+[Unit]
+Description=Strategy Manager Worker API Server
+After=network.target
+
+# 可选依赖：如果你的策略需要 MongoDB/Redis，取消下面两行的注释
+# After=mongodb.service redis.service
+# Wants=mongodb.service redis.service
+
+[Service]
+Type=simple
+User=shuyolin
+Group=shuyolin
+WorkingDirectory=/home/shuyolin/trading/quant-strategy-manager
+
+# 使用 vnpy 虚拟环境的 Python
+Environment="PATH=/home/shuyolin/trading/vnpy-live-trading/.venv/bin:/usr/local/bin:/usr/bin"
+Environment="PYTHONPATH=/home/shuyolin/trading/quant-strategy-manager/src"
+
+# MongoDB 配置（可选）
+Environment="MONGO_URI=mongodb://localhost:27017"
+Environment="MONGO_DB=finance"
+
+# 日志配置
+Environment="ENABLE_MONGO_LOGS=false"
+
+# 启动命令
+ExecStart=/home/shuyolin/trading/vnpy-live-trading/.venv/bin/python api_server.py
+
+# 重启策略
+Restart=always
+RestartSec=10
+StartLimitInterval=300
+StartLimitBurst=5
+
+# 资源限制
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=worker-api
+
+# 安全加固
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
