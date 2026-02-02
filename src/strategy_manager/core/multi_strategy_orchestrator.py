@@ -13,6 +13,7 @@ from pymongo import MongoClient
 import os
 
 from .strategy_worker import StrategyWorker
+from ..strategy_registry import get_engine_class_for_strategy
 
 
 @dataclass
@@ -24,7 +25,8 @@ class StrategyConfig:
     enabled: bool
     user_id: Optional[str] = None
     engine: str = "backtrader"  # "backtrader" or "vnpy"
-    engine_class: Optional[str] = None  # For vnpy: full class path
+    # Note: engine_class is deprecated - use strategy_registry instead
+    engine_class: Optional[str] = None  # Legacy field, will be auto-resolved
     
     @classmethod
     def from_db_doc(cls, doc: Dict) -> 'StrategyConfig':
@@ -36,6 +38,7 @@ class StrategyConfig:
             enabled=doc.get("enabled", True),
             user_id=str(doc.get("user_id")) if doc.get("user_id") is not None else None,
             engine=doc.get("engine", "backtrader"),
+            # Legacy support: read engine_class from DB if present
             engine_class=doc.get("engine_class"),
         )
 
@@ -205,10 +208,27 @@ class MultiStrategyOrchestrator:
             
             # Add engine-specific config
             if config.engine == "vnpy":
-                if not config.engine_class:
-                    self.log.error(f"engine_class required for vnpy worker: {config.symbol}")
+                # Auto-resolve engine_class from strategy_registry
+                engine_class_path = config.engine_class  # Legacy: try DB value first
+                
+                if not engine_class_path:
+                    # Modern approach: lookup by strategy_key
+                    engine_class_path = get_engine_class_for_strategy(
+                        config.strategy_key, 
+                        engine="vnpy"
+                    )
+                
+                if not engine_class_path:
+                    self.log.error(
+                        f"Unknown vnpy strategy '{config.strategy_key}'. "
+                        f"Please register in strategy_registry.py or add engine_class to DB."
+                    )
                     return
-                worker_config["engine_class_path"] = config.engine_class
+                
+                worker_config["engine_class_path"] = engine_class_path
+                self.log.info(
+                    f"Resolved {config.strategy_key} → {engine_class_path}"
+                )
             
             # Create worker
             worker = factory(worker_config)

@@ -168,16 +168,57 @@ Store strategy configurations in MongoDB:
 {
   "user_id": "user123",
   "symbol": "002050.SZ",
-  "strategy_key": "hidden_dragon",
+  "strategy_key": "hidden_dragon",  // 策略标识符
   "enabled": true,
   
-  // Specify engine
-  "engine": "vnpy",
-  "engine_class": "scripts.single_stream_hidden_dragon.SingleStreamRealTimeEngine",
+  // engine 字段会由 API 自动添加，前端不需要设置
+  // "engine": "vnpy"  ← 后端自动添加（实盘策略仅支持 vnpy）
   
   // Strategy parameters
   "params": {
     "limit_up_rate": 0.090,
+    "max_callback_days": 20,
+    "stop_loss_pct": 0.05,
+    "take_profit_pct": 0.15,
+    ...
+  }
+}
+```
+
+**前端保存示例**：
+
+```javascript
+// 前端只需要提供这些字段
+const data = {
+  symbol: "002050.SZ",
+  strategy: "hidden_dragon",  // strategy_key
+  params: { /* ... */ }
+}
+
+// POST /api/user/watchlist/strategy
+// 后端会自动添加 engine: "vnpy"
+```
+
+**支持的策略类型** (strategy_key):
+
+| strategy_key | 说明 | 引擎类（自动解析） |
+|--------------|------|-------------------|
+| `hidden_dragon` | 潜龙出海策略 | SingleStreamRealTimeEngine |
+| `turtle` | 海龟交易策略 | TurtleRealTimeEngine |
+| `single_yang` | 单阳不破策略 | SingleYangRealTimeEngine |
+| `grid` | 网格交易策略 | GridRealTimeEngine |
+
+**工作流程**：
+
+1. **前端提交**：只需要 `symbol` + `strategy_key` + `params`
+2. **后端自动添加**：`engine: "vnpy"`（因为实盘策略目前仅支持 vnpy）
+3. **系统自动解析**：根据 `strategy_key` 从注册表查找对应的引擎类
+4. **Worker 启动**：使用解析出的引擎类创建策略实例
+
+**注意**：
+- ✅ 前端不需要关心 `engine` 字段（后端自动设置）
+- ✅ 前端不需要关心 `engine_class` 字段（系统自动解析）
+- ✅ 只需要选择 `strategy_key` 即可
     "max_callback_days": 20,
     "stop_loss_pct": 0.05,
     "take_profit_pct": 0.15,
