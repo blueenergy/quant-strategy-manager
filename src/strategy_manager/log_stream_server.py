@@ -81,7 +81,9 @@ class LogStreamServer:
             # Signal that the server is ready and port is assigned
             self._server_ready.set()
             
-            await asyncio.Future()  # Run forever
+            # 使用可取消的 Future 代替无限阻塞
+            self._stop_event = asyncio.Event()
+            await self._stop_event.wait()
 
     def start(self):
         """Starts the server in a background thread and waits for it to be ready."""
@@ -104,23 +106,41 @@ class LogStreamServer:
         asyncio.set_event_loop(self.loop)
         try:
             self.loop.run_until_complete(self._run_server())
-        except asyncio.CancelledError:
-            logger.info("Log stream server loop cancelled.")
+        except (asyncio.CancelledError, RuntimeError) as e:
+            logger.debug(f"Log stream server loop stopped: {e}")
+        finally:
+            # 清理所有待处理任务
+            pending = asyncio.all_tasks(self.loop)
+            for task in pending:
+                task.cancel()
+            # 给任务一个清理的机会
+            if pending:
+                self.loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            self.loop.close()
 
     def stop(self):
         """Stops the server and the background thread."""
-        if self.loop and self.server:
-            logger.info("Stopping log stream server...")
-            self.loop.call_soon_threadsafe(self.server.close)
-            self.loop.call_soon_threadsafe(self.loop.stop)
+        if not self.loop or not self.thread:
+            return
+            
+        logger.info("Stopping log stream server...")
+        
+        # 步骤 1: 触发停止事件（让 _run_server 正常退出 async with 块）
+        if hasattr(self, '_stop_event'):
+            self.loop.call_soon_threadsafe(self._stop_event.set)
+        
+        # 步骤 2: 等待线程结束
         if self.thread:
-            self.thread.join(timeout=5)
+            self.thread.join(timeout=3)
             if self.thread.is_alive():
-                logger.warning("Log stream server thread did not terminate gracefully.")
+                logger.warning("Log stream server thread did not terminate within timeout")
+        
+        # 步骤 3: 清理资源
         self.thread = None
         self.loop = None
         self.server = None
         self._server_ready.clear()
+        
         logger.info("Log stream server stopped.")
 
     def broadcast(self, message: dict):
