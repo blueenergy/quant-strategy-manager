@@ -43,19 +43,58 @@ Supports multiple execution engines (backtrader, vnpy, and more) through a unifi
 
 #### 1. Installation
 
+**注意**：本项目采用环境隔离策略：
+- **核心库**：可独立安装
+- **API Server**：必须在 vnpy 环境中运行（依赖 vnpy 生态）
+
+##### 方式 1: 独立安装（仅使用核心功能）
+
 ```bash
-# Basic installation
-pip install quant-strategy-manager
+# 安装核心库
+pip install -e .
 
-# With vnpy support
-pip install quant-strategy-manager[vnpy]
-
-# With backtrader support
-pip install quant-strategy-manager[backtrader]
-
-# With all engines
-pip install quant-strategy-manager[all]
+# 或安装开发工具
+pip install -e ".[dev]"
 ```
+
+##### 方式 2: 在 vnpy 环境中安装（运行 API Server）
+
+```bash
+# 1. 进入 vnpy 虚拟环境
+cd ~/trading/vnpy-live-trading
+source .venv/bin/activate
+
+# 2. 安装 API Server 依赖
+cd ~/trading/quant-strategy-manager
+pip install -r requirements-api.txt
+
+# 注意：vnpy 及其依赖应该已在 vnpy-live-trading/.venv 中安装
+```
+
+##### 方式 3: 在 backtrader 环境中使用
+
+```bash
+# 1. 创建 backtrader 专用环境（如果还没有）
+python -m venv ~/trading/backtrader-env
+source ~/trading/backtrader-env/bin/activate
+
+# 2. 安装 backtrader
+pip install backtrader>=1.9.76
+
+# 3. 安装 quant-strategy-manager 核心库
+cd ~/trading/quant-strategy-manager
+pip install -e .
+```
+
+**依赖策略说明**：
+- **核心库依赖**：`pymongo`、`python-dateutil`、`websockets`（最小化）
+- **交易引擎**：`vnpy`/`backtrader` 不作为依赖声明，通过**环境隔离**使用
+- **API Server**：`fastapi`、`uvicorn` 按需安装（可选）
+
+**设计理念**：Engine-agnostic（引擎无关）
+- 用户可以只使用 vnpy 适配器，不需要安装 backtrader
+- 用户可以只使用 backtrader 适配器，不需要安装 vnpy  
+- 核心库保持轻量级，交易引擎由用户环境提供
 
 #### 2. Configuration Setup
 
@@ -187,6 +226,63 @@ orchestrator.get_status()
 #   }
 # }
 ```
+
+## Development: Linting & Formatting
+
+We use `ruff` for fast linting/auto-fix and `black` for canonical formatting.
+
+Install the tools (developer environment):
+
+```bash
+# inside your dev venv
+pip install ruff black pre-commit
+```
+
+Run checks:
+
+```bash
+# Lint (ruff)
+ruff check .
+
+# Format check (black)
+black --check .
+```
+
+Auto-fix / format:
+
+```bash
+# Auto-fix lint issues and apply simple fixes
+ruff check --fix .
+
+# Or use ruff format
+ruff format .
+
+# Format code with black
+black .
+```
+
+Add to git hooks with `pre-commit` (recommended):
+
+1. Create a `.pre-commit-config.yaml` with `ruff` and `black` hooks.
+2. Install: `pre-commit install`.
+
+Example minimal `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: "stable"
+    hooks:
+      - id: ruff
+
+  - repo: https://github.com/psf/black
+    rev: 23.9.1
+    hooks:
+      - id: black
+```
+
+This gives fast feedback and enforces consistent formatting across contributors.
+
 
 ### View Logs in Browser
 

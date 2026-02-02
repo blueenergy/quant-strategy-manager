@@ -26,6 +26,7 @@ classifiers = [
 dependencies = [
     "pymongo>=4.0.0",
     "python-dateutil>=2.8.0",
+    "websockets>=12.0",  # LogStreamServer 需要
 ]
 
 [project.optional-dependencies]
@@ -33,27 +34,31 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "black>=22.0",
-    "flake8>=5.0",
+    "ruff>=0.11.0",
     "mypy>=0.990",
 ]
 
-# 新增：API 服务器依赖
+# API 服务器依赖（需要在 vnpy 环境中运行）
 api = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
+    # 注意：还需要手动安装 vnpy 及其依赖（见 vnpy-live-trading）
 ]
 
+# vnpy 引擎适配器（在 vnpy 环境中已安装）
 vnpy = [
-    "vnpy>=3.0.0",
+    # vnpy 及其所有依赖应该在 vnpy-live-trading/.venv 中安装
+    # 本项目通过环境隔离使用，不直接声明版本依赖
 ]
 
+# backtrader 引擎适配器（用户自行安装）
 backtrader = [
-    "backtrader>=1.9.76",
+    # backtrader 应该在使用它的环境中单独安装
+    # 本项目提供适配器，但不强制依赖特定版本
 ]
 
+# 所有可选依赖（仅包含 API 服务器相关）
 all = [
-    "vnpy>=3.0.0",
-    "backtrader>=1.9.76",
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
 ]

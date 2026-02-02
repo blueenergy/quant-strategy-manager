@@ -1,0 +1,23 @@
+# API Server Runtime Dependencies
+# 
+# 注意：api_server.py 必须在 vnpy-live-trading/.venv 环境中运行
+# 因为它依赖 VnpyWorkerAdapter，而该适配器需要完整的 vnpy 环境
+#
+# 安装方法：
+#   cd ~/trading/vnpy-live-trading
+#   source .venv/bin/activate
+#   pip install -r ~/trading/quant-strategy-manager/requirements-api.txt
+
+# 核心依赖（quant-strategy-manager）
+pymongo>=4.0.0
+python-dateutil>=2.8.0
+websockets>=12.0
+
+# API 服务器依赖
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# vnpy 环境中应该已安装（来自 vnpy-live-trading/requirements.txt）：
+# vnpy>=3.9.0
+# vnpy_ctastrategy
+# 以及所有 vnpy 相关依赖...
