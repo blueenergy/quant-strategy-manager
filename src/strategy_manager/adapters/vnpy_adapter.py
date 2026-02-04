@@ -81,7 +81,8 @@ class VnpyWorkerAdapter(StrategyWorker):
         )
         
         # Setup logging with WebSocket streaming support and file logging
-        self.log = logging.getLogger(f"VnpyWorker[{symbol}]")
+        # 🎯 Logger name：包含完整标识（user_id + strategy_key + symbol）确保唯一
+        self.log = logging.getLogger(f"scripts.{user_id or 'unknown'}_{strategy_key}_{symbol}")
         self.log.propagate = False  # Avoid duplicate logs
         
         # Create logs directory (use vnpy-live-trading as project root)
@@ -115,6 +116,7 @@ class VnpyWorkerAdapter(StrategyWorker):
             console_handler.setFormatter(fmt)
             self.log.addHandler(console_handler)
             
+ 
             # File handler (rotating, max 10MB per file, keep 5 backups)
             try:
                 file_handler = RotatingFileHandler(
@@ -124,6 +126,15 @@ class VnpyWorkerAdapter(StrategyWorker):
                     encoding='utf-8'
                 )
                 file_handler.setFormatter(fmt)
+                
+                # 🎯 为文件 handler 添加三维过滤器
+                symbol_filter = SymbolLogFilter(
+                    user_id=user_id or 'unknown',
+                    strategy_key=strategy_key,
+                    symbol=symbol
+                )
+                file_handler.addFilter(symbol_filter)
+                
                 self.log.addHandler(file_handler)
                 self.log.info(f"Logging to file: {self.log_file}")
             except Exception as e:
@@ -137,8 +148,12 @@ class VnpyWorkerAdapter(StrategyWorker):
                 ws_handler = WebSocketLogHandler(self._log_server)
                 ws_handler.setFormatter(fmt)
                 
-                # 🎯 添加股票代码过滤器，防止多个股票的日志混合
-                symbol_filter = SymbolLogFilter(symbol)
+                # 🎯 添加三维过滤器
+                symbol_filter = SymbolLogFilter(
+                    user_id=user_id or 'unknown',
+                    strategy_key=strategy_key,
+                    symbol=symbol
+                )
                 ws_handler.addFilter(symbol_filter)
                 
                 self.log.addHandler(ws_handler)
@@ -151,8 +166,6 @@ class VnpyWorkerAdapter(StrategyWorker):
         self.log.setLevel(logging.INFO)
         
         # 🔗 连接 vnpy 引擎的 logger 到 Worker 的日志处理器
-        # vnpy 引擎内部有自己的 logger，需要将 Worker 的文件/WebSocket handler 也添加进去
-        # 这样引擎内部的日志（市场数据、交易信号）才会写入文件
         if hasattr(self.engine, 'logger') and isinstance(self.engine.logger, logging.Logger):
             vnpy_logger = self.engine.logger
             
@@ -160,14 +173,32 @@ class VnpyWorkerAdapter(StrategyWorker):
             for handler in self.log.handlers:
                 # 避免重复添加
                 if handler not in vnpy_logger.handlers:
-                    # 🎯 为添加到 vnpy_logger 的 WebSocket handler 也添加股票代码过滤器
-                    if isinstance(handler, WebSocketLogHandler):
-                        # 为 WebSocket handler 添加过滤器，防止混合日志
-                        symbol_filter = SymbolLogFilter(symbol)
+                    if isinstance(handler, RotatingFileHandler):
+                        # 📄 文件处理器：添加三维过滤器
+                        symbol_filter = SymbolLogFilter(
+                            user_id=user_id or 'unknown',
+                            strategy_key=strategy_key,
+                            symbol=symbol
+                        )
                         handler.addFilter(symbol_filter)
-                        self.log.info(f"Added symbol filter to vnpy logger's WebSocket handler for {symbol}")
-                    
-                    vnpy_logger.addHandler(handler)
+                        vnpy_logger.addHandler(handler)
+                        self.log.info(f"Added filtered file handler to vnpy logger for {symbol}")
+                        
+                    elif isinstance(handler, WebSocketLogHandler):
+                        # 🌐 为 vnpy logger 创建新的 WebSocket handler，带三维过滤器
+                        vnpy_ws_handler = WebSocketLogHandler(handler.log_server)
+                        vnpy_ws_handler.setFormatter(handler.formatter if handler.formatter else fmt)
+                        
+                        # 添加三维过滤器
+                        symbol_filter = SymbolLogFilter(
+                            user_id=user_id or 'unknown',
+                            strategy_key=strategy_key,
+                            symbol=symbol
+                        )
+                        vnpy_ws_handler.addFilter(symbol_filter)
+                        
+                        vnpy_logger.addHandler(vnpy_ws_handler)
+                        self.log.info(f"Added filtered WebSocket handler to vnpy logger for {symbol}")
             
             # 确保日志级别一致
             vnpy_logger.setLevel(self.log.level)

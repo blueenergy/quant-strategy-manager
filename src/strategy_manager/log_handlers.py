@@ -2,6 +2,7 @@
 Custom logging handlers for the strategy manager framework.
 """
 import logging
+import re
 from datetime import datetime
 
 # To avoid circular import, use TYPE_CHECKING to import LogStreamServer for type hints
@@ -11,41 +12,53 @@ if TYPE_CHECKING:
 
 
 class SymbolLogFilter(logging.Filter):
-    """
-    过滤器：只允许包含特定股票代码的日志通过
-    用于防止多个 Worker 的日志混合发送到同一个 WebSocket
-    """
-    def __init__(self, symbol: str):
+    """Filter logs by symbol and worker identity (user_id + strategy_key + symbol)."""
+    
+    def __init__(self, user_id: str, strategy_key: str, symbol: str):
+        """
+        Initialize filter with complete worker identity.
+        
+        Args:
+            user_id: User identifier
+            strategy_key: Strategy identifier  
+            symbol: Stock symbol
+        """
         super().__init__()
+        self.user_id = user_id
+        self.strategy_key = strategy_key
         self.symbol = symbol
     
     def filter(self, record: logging.LogRecord) -> bool:
         """
-        检查日志是否属于当前股票
+        Filter logic: allow logs that match this worker's symbol.
         
-        策略：
-        1. 如果 logger name 包含股票代码，只匹配 logger name
-        2. 如果消息内容包含股票代码，检查是否匹配
-        3. 如果都不包含，允许通过（通用日志）
+        1. If logger name contains this worker's symbol → allow
+        2. If message contains this symbol → allow
+        3. If contains other symbols → reject
+        4. If no symbols at all → allow (system logs)
         """
-        # 检查 logger name（如 scripts.single_stream_hidden_dragon.300347.SZ）
-        if self.symbol in record.name:
+        logger_name = record.name
+        message = record.getMessage()
+        
+        # 检查 logger 名字中是否有当前 symbol
+        if self.symbol in logger_name:
             return True
         
-        # 检查消息内容
-        msg = record.getMessage()
-        if self.symbol in msg:
-            return True
-        
-        # 如果日志中包含其他股票代码，拒绝
+        # 检查消息内容中的股票代码
         import re
-        stock_codes = re.findall(r'\d{6}\.(SZ|SH|BJ)', msg)
-        if stock_codes:
-            # 有股票代码但不是当前股票，拒绝
-            return False
+        stock_codes = re.findall(r'\d{6}\.(SZ|SH|BJ)', message)
         
-        # 通用日志，允许通过
-        return True
+        if stock_codes:
+            # 消息包含股票代码
+            if self.symbol in stock_codes:
+                # 包含当前 symbol → 允许
+                return True
+            else:
+                # 包含其他 symbol → 拒绝
+                return False
+        else:
+            # 没有股票代码 → 允许（系统日志）
+            return True
 
 
 class WebSocketLogHandler(logging.Handler):
