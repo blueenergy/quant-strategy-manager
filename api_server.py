@@ -139,6 +139,29 @@ def get_orchestrator():
     return orchestrator
 
 
+def get_public_websocket_url(worker_ws_url):
+    """将 Worker 的直接 WebSocket URL 转换为通过 Nginx 的 URL"""
+    import re
+    
+    # 提取端口号
+    match = re.search(r':(\d+)', worker_ws_url)
+    if not match:
+        return worker_ws_url
+    
+    port = match.group(1)
+    public_host = os.getenv('PUBLIC_HOST', '115.190.254.11')
+    
+    # 生产环境使用 Nginx 代理路径
+    use_nginx = os.getenv('USE_NGINX_WEBSOCKET', 'false').lower() == 'true'
+    
+    if use_nginx:
+        # 通过 Nginx /ws/{port} 路径
+        return f"ws://{public_host}/ws/{port}"
+    else:
+        # 直接 WebSocket（开发环境）
+        return worker_ws_url.replace('0.0.0.0', public_host).replace('localhost', public_host)
+
+
 @app.get("/api/workers")
 async def list_workers() -> Dict[str, Any]:
     """获取所有 Workers 及其日志流地址"""
@@ -157,14 +180,7 @@ async def list_workers() -> Dict[str, Any]:
         if hasattr(worker, 'get_log_stream_url'):
             log_url = worker.get_log_stream_url()
             if log_url:
-                # 🔧 替换 0.0.0.0/localhost 为公网 IP
-                import re
-                log_url = re.sub(
-                    r'ws://(0\.0\.0\.0|localhost|127\.0\.0\.1)',
-                    f'ws://{public_host}',
-                    log_url
-                )
-                worker_data["log_stream_url"] = log_url
+                worker_data["log_stream_url"] = get_public_websocket_url(log_url)
         
         workers_info[key] = worker_data
     
@@ -189,15 +205,7 @@ async def get_worker(worker_key: str) -> Dict[str, Any]:
     if hasattr(worker, 'get_log_stream_url'):
         log_url = worker.get_log_stream_url()
         if log_url:
-            # 🔧 替换主机名
-            public_host = get_public_host()
-            import re
-            log_url = re.sub(
-                r'ws://(0\.0\.0\.0|localhost|127\.0\.0\.1)',
-                f'ws://{public_host}',
-                log_url
-            )
-            worker_info["log_stream_url"] = log_url
+            worker_info["log_stream_url"] = get_public_websocket_url(log_url)
     
     return worker_info
 
