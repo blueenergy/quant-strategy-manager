@@ -11,7 +11,7 @@ from logging.handlers import RotatingFileHandler
 
 from ..core.strategy_worker import StrategyWorker, WorkerState
 from ..log_stream_server import LogStreamServer
-from ..log_handlers import WebSocketLogHandler
+from ..log_handlers import WebSocketLogHandler, SymbolLogFilter
 
 
 class VnpyWorkerAdapter(StrategyWorker):
@@ -136,6 +136,11 @@ class VnpyWorkerAdapter(StrategyWorker):
                 
                 ws_handler = WebSocketLogHandler(self._log_server)
                 ws_handler.setFormatter(fmt)
+                
+                # 🎯 添加股票代码过滤器，防止多个股票的日志混合
+                symbol_filter = SymbolLogFilter(symbol)
+                ws_handler.addFilter(symbol_filter)
+                
                 self.log.addHandler(ws_handler)
                 
                 self.log.info(f"Log stream available at {self.get_log_stream_url()}")
