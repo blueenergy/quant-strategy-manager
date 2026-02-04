@@ -131,7 +131,7 @@ class VnpyWorkerAdapter(StrategyWorker):
             
             # WebSocket log streaming (dynamic port)
             try:
-                self._log_server = LogStreamServer(host="0.0.0.0", port=0)
+                self._log_server = LogStreamServer(host="0.0.0.0", port=0, symbol=symbol)
                 self._log_server.start()
                 
                 ws_handler = WebSocketLogHandler(self._log_server)
@@ -160,6 +160,13 @@ class VnpyWorkerAdapter(StrategyWorker):
             for handler in self.log.handlers:
                 # 避免重复添加
                 if handler not in vnpy_logger.handlers:
+                    # 🎯 为添加到 vnpy_logger 的 WebSocket handler 也添加股票代码过滤器
+                    if isinstance(handler, WebSocketLogHandler):
+                        # 为 WebSocket handler 添加过滤器，防止混合日志
+                        symbol_filter = SymbolLogFilter(symbol)
+                        handler.addFilter(symbol_filter)
+                        self.log.info(f"Added symbol filter to vnpy logger's WebSocket handler for {symbol}")
+                    
                     vnpy_logger.addHandler(handler)
             
             # 确保日志级别一致

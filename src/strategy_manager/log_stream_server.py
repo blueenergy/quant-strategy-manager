@@ -20,17 +20,19 @@ class LogStreamServer:
     Manages a WebSocket server in a background thread to stream logs.
     Maintains a buffer of recent logs to send to new clients.
     """
-    def __init__(self, host: str = "0.0.0.0", port: int = 0, history_size: int = 100):
+    def __init__(self, host: str = "0.0.0.0", port: int = 0, symbol: str = None, history_size: int = 100):
         """
         Initializes the server.
 
         Args:
             host: The host to bind the server to.
             port: The port to bind to. If 0, an available port will be chosen.
+            symbol: Optional stock symbol (e.g., '300347.SZ') for filtering logs
             history_size: Number of recent log messages to keep in buffer (default: 100)
         """
         self.host = host
         self.port = port
+        self.symbol = symbol
         self.server = None
         self.loop = None
         self.thread = None
