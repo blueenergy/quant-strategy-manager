@@ -119,7 +119,7 @@ Group=your_group
 确保路径正确：
 
 ```ini
-WorkingDirectory=/home/shuyolin/own/quant-strategy-manager
+WorkingDirectory=/home/shuyolin/trading/quant-strategy-manager
 ```
 
 ### Python 环境
@@ -127,8 +127,8 @@ WorkingDirectory=/home/shuyolin/own/quant-strategy-manager
 确保使用 vnpy 虚拟环境：
 
 ```ini
-Environment="PATH=/home/shuyolin/own/vnpy-live-trading/.venv/bin:/usr/local/bin:/usr/bin"
-ExecStart=/home/shuyolin/own/vnpy-live-trading/.venv/bin/python api_server.py
+Environment="PATH=/home/shuyolin/trading/vnpy-live-trading/.venv/bin:/usr/local/bin:/usr/bin"
+ExecStart=/home/shuyolin/trading/vnpy-live-trading/.venv/bin/python api_server.py
 ```
 
 ## 🔍 故障排查
@@ -143,8 +143,8 @@ sudo journalctl -u worker-api -n 50 --no-pager
 sudo systemd-analyze verify /etc/systemd/system/worker-api.service
 
 # 3. 测试手动运行
-cd ~/own/quant-strategy-manager
-source ~/own/vnpy-live-trading/.venv/bin/activate
+cd ~/trading/quant-strategy-manager
+source ~/trading/vnpy-live-trading/.venv/bin/activate
 python api_server.py
 ```
 
@@ -152,13 +152,13 @@ python api_server.py
 
 ```bash
 # 检查文件权限
-ls -la ~/own/quant-strategy-manager/api_server.py
+ls -la ~/trading/quant-strategy-manager/api_server.py
 
 # 检查日志目录权限
-ls -la ~/own/vnpy-live-trading/logs/workers/
+ls -la ~/trading/vnpy-live-trading/logs/workers/
 
 # 创建日志目录（如果不存在）
-mkdir -p ~/own/vnpy-live-trading/logs/workers/
+mkdir -p ~/trading/vnpy-live-trading/logs/workers/
 ```
 
 ### 端口被占用

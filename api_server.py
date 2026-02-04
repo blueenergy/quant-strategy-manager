@@ -5,9 +5,15 @@ Strategy Manager API Server (FastAPI)
 生产环境 REST API 服务器，暴露 Worker 信息和实时日志流地址。
 
 使用方法:
-    cd /home/shuyolin/own/quant-strategy-manager
+    cd /home/shuyolin/trading/quant-strategy-manager
     uvicorn api_server:app --host 0.0.0.0 --port 5000
 """
+
+from dotenv import load_dotenv
+
+# 加载 .env 文件中的环境变量（优先级：.env > config/.env > 环境变量）
+load_dotenv()  # 默认加载当前目录的 .env
+load_dotenv('config/.env')  # 也加载 config 目录下的 .env
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse, PlainTextResponse
@@ -18,6 +24,7 @@ import logging
 import signal
 import atexit
 from pathlib import Path
+import socket
 
 # 添加项目路径
 project_root = Path(__file__).parent / "src"
@@ -46,6 +53,32 @@ app = FastAPI(
 
 # 全局 orchestrator 实例
 orchestrator = None
+
+
+def get_public_host():
+    """获取公网可访问的主机地址"""
+    # 1. 优先使用环境变量
+    public_host = os.getenv('PUBLIC_HOST')
+    if public_host:
+        return public_host
+    
+    # 2. 自动获取本机 IP
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return '127.0.0.1'
+
+
+@app.on_event("startup")
+async def startup_event():
+    """FastAPI 启动时初始化 orchestrator"""
+    logger.info("🚀 FastAPI startup - initializing orchestrator...")
+    get_orchestrator()  # 触发初始化
+    logger.info("✓ Startup complete")
 
 
 def get_orchestrator():
@@ -81,8 +114,27 @@ def get_orchestrator():
         config_count = orchestrator.load_configurations()
         logger.info(f"✓ Loaded {config_count} strategy configurations")
         
+        # 显示配置详情
+        if config_count > 0:
+            logger.info("Configuration details:")
+            for key, config in orchestrator.configurations.items():
+                logger.info(f"  - {key}: {config.symbol} | {config.strategy_key} | engine={config.engine}")
+        else:
+            logger.warning("⚠️  No enabled configurations found in database!")
+        
+        # 同步 workers
+        logger.info("Syncing workers...")
         orchestrator.sync_workers()
         logger.info(f"✓ {len(orchestrator.workers)} workers active")
+        
+        # 显示 worker 详情
+        if orchestrator.workers:
+            logger.info("Active workers:")
+            for worker_key, worker in orchestrator.workers.items():
+                status = "alive" if worker.is_alive() else "stopped"
+                logger.info(f"  - {worker_key}: {status}")
+        else:
+            logger.warning("⚠️  No workers started!")
     
     return orchestrator
 
@@ -91,8 +143,32 @@ def get_orchestrator():
 async def list_workers() -> Dict[str, Any]:
     """获取所有 Workers 及其日志流地址"""
     orch = get_orchestrator()
-    status = orch.get_status()
-    return status
+    workers_info = {}
+    
+    public_host = get_public_host()  # ← 获取公网 IP
+    
+    for key, worker in orch.workers.items():
+        worker_data = {
+            "alive": worker.is_alive(),
+            "stats": worker.get_stats() if hasattr(worker, 'get_stats') else {}
+        }
+        
+        # 添加 log stream URL
+        if hasattr(worker, 'get_log_stream_url'):
+            log_url = worker.get_log_stream_url()
+            if log_url:
+                # 🔧 替换 0.0.0.0/localhost 为公网 IP
+                import re
+                log_url = re.sub(
+                    r'ws://(0\.0\.0\.0|localhost|127\.0\.0\.1)',
+                    f'ws://{public_host}',
+                    log_url
+                )
+                worker_data["log_stream_url"] = log_url
+        
+        workers_info[key] = worker_data
+    
+    return {"workers": workers_info}
 
 
 @app.get("/api/workers/{worker_key}")
@@ -104,16 +180,23 @@ async def get_worker(worker_key: str) -> Dict[str, Any]:
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
     
-    # 获取 worker 信息
     worker_info = {
         "alive": worker.is_alive(),
         "stats": worker.get_stats() if hasattr(worker, 'get_stats') else {}
     }
     
-    # 添加 log stream URL（如果有）
+    # 添加 log stream URL
     if hasattr(worker, 'get_log_stream_url'):
         log_url = worker.get_log_stream_url()
         if log_url:
+            # 🔧 替换主机名
+            public_host = get_public_host()
+            import re
+            log_url = re.sub(
+                r'ws://(0\.0\.0\.0|localhost|127\.0\.0\.1)',
+                f'ws://{public_host}',
+                log_url
+            )
             worker_info["log_stream_url"] = log_url
     
     return worker_info
@@ -270,23 +353,24 @@ atexit.register(cleanup_orchestrator)          # 进程退出时
 if __name__ == '__main__':
     import uvicorn
     
+    port = int(os.getenv('API_PORT', '5000'))
+    
     print("=" * 80)
     print("Strategy Manager API Server (FastAPI)")
     print("=" * 80)
     print(f"\nMongoDB: {os.getenv('MONGO_URI', 'mongodb://localhost:27017')}")
     print(f"Database: {os.getenv('MONGO_DB', 'finance')}")
-    print(f"\nAPI Server: http://0.0.0.0:{os.getenv('API_PORT', '5000')}")
-    print("API Docs: http://0.0.0.0:5000/docs")
+    print(f"\nAPI Server: http://0.0.0.0:{port}")
+    print(f"API Docs: http://0.0.0.0:{port}/docs")
     print("\nEndpoints:")
     print("  • GET  /api/workers")
     print("  • GET  /api/workers/{worker_key}")
     print("  • GET  /api/workers/{worker_key}/console")
     print("  • GET  /api/workers/{worker_key}/logs")
+    print("  • GET  /api/workers/{worker_key}/logs?tail=100")
     print("  • GET  /api/status")
     print("  • GET  /health")
     print("\n" + "=" * 80 + "\n")
-    
-    port = int(os.getenv('API_PORT', '5000'))
     
     try:
         uvicorn.run(app, host="0.0.0.0", port=port)
