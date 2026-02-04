@@ -12,6 +12,7 @@ from logging.handlers import RotatingFileHandler
 from ..core.strategy_worker import StrategyWorker, WorkerState
 from ..log_stream_server import LogStreamServer
 from ..log_handlers import WebSocketLogHandler, SymbolLogFilter
+from ..log_config import LogConfig
 
 
 class VnpyWorkerAdapter(StrategyWorker):
@@ -80,13 +81,12 @@ class VnpyWorkerAdapter(StrategyWorker):
             strategy_params=params
         )
         
-        # Setup logging with WebSocket streaming support and file logging
+        # Setup logging with flexible backend (local file, ELK, Loki, etc.)
         # 🎯 Logger name：包含完整标识（user_id + strategy_key + symbol）确保唯一
         self.log = logging.getLogger(f"scripts.{user_id or 'unknown'}_{strategy_key}_{symbol}")
         self.log.propagate = False  # Avoid duplicate logs
         
-        # Create logs directory (use vnpy-live-trading as project root)
-        # Try to find vnpy-live-trading directory
+        # Determine log file path for file backend
         current_file = Path(__file__)
         vnpy_root = None
         
@@ -102,45 +102,52 @@ class VnpyWorkerAdapter(StrategyWorker):
             vnpy_root = current_file.parent.parent.parent.parent / "vnpy-live-trading"
         
         log_dir = vnpy_root / "logs" / "workers"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Log file path (one file per worker) - use worker_key from parent class
         log_filename = f"{user_id or 'unknown'}_{symbol}_{strategy_key}.log"
         self.log_file = log_dir / log_filename
         
         if not self.log.handlers:
             fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
             
-            # Console handler
+            # Console handler (always present for debugging)
             console_handler = logging.StreamHandler()
             console_handler.setFormatter(fmt)
             self.log.addHandler(console_handler)
             
- 
-            # File handler (rotating, max 10MB per file, keep 5 backups)
+            # Setup file or remote backend based on configuration
             try:
-                file_handler = RotatingFileHandler(
-                    self.log_file,
-                    maxBytes=10*1024*1024,  # 10MB
-                    backupCount=5,
-                    encoding='utf-8'
-                )
-                file_handler.setFormatter(fmt)
+                backend_handler = LogConfig.setup_logger(
+                    name=self.log.name,
+                    log_file=str(self.log_file)
+                ).handlers[0] if LogConfig.setup_logger(
+                    name=self.log.name,
+                    log_file=str(self.log_file)
+                ).handlers else None
                 
-                # 🎯 为文件 handler 添加三维过滤器
+                if backend_handler is None:
+                    # Fallback to file handler if config fails
+                    file_handler = RotatingFileHandler(
+                        self.log_file,
+                        maxBytes=10*1024*1024,
+                        backupCount=5,
+                        encoding='utf-8'
+                    )
+                    file_handler.setFormatter(fmt)
+                    backend_handler = file_handler
+                
+                # Add filter to backend handler
                 symbol_filter = SymbolLogFilter(
                     user_id=user_id or 'unknown',
                     strategy_key=strategy_key,
                     symbol=symbol
                 )
-                file_handler.addFilter(symbol_filter)
+                backend_handler.addFilter(symbol_filter)
+                self.log.addHandler(backend_handler)
                 
-                self.log.addHandler(file_handler)
-                self.log.info(f"Logging to file: {self.log_file}")
+                self.log.info(f"Logging configured (backend: {LogConfig.get_config().get('type', 'file')})")
             except Exception as e:
-                self.log.warning(f"Failed to setup file logging: {e}")
+                self.log.warning(f"Failed to setup logging backend: {e}")
             
-            # WebSocket log streaming (dynamic port)
+            # WebSocket log streaming (dynamic port) for real-time monitoring
             try:
                 self._log_server = LogStreamServer(host="0.0.0.0", port=0, symbol=symbol)
                 self._log_server.start()
@@ -148,7 +155,7 @@ class VnpyWorkerAdapter(StrategyWorker):
                 ws_handler = WebSocketLogHandler(self._log_server)
                 ws_handler.setFormatter(fmt)
                 
-                # 🎯 添加三维过滤器
+                # 🎯 Add symbol filter to WebSocket handler
                 symbol_filter = SymbolLogFilter(
                     user_id=user_id or 'unknown',
                     strategy_key=strategy_key,
@@ -157,7 +164,6 @@ class VnpyWorkerAdapter(StrategyWorker):
                 ws_handler.addFilter(symbol_filter)
                 
                 self.log.addHandler(ws_handler)
-                
                 self.log.info(f"Log stream available at {self.get_log_stream_url()}")
             except Exception as e:
                 self.log.warning(f"Failed to start log stream server: {e}")
@@ -165,18 +171,44 @@ class VnpyWorkerAdapter(StrategyWorker):
         
         self.log.setLevel(logging.INFO)
         
-        # 🔗 连接 vnpy 引擎的 logger 到 Worker 的日志处理器
+        # 🔗 Link vnpy engine logger to Worker handlers
         if hasattr(self.engine, 'logger') and isinstance(self.engine.logger, logging.Logger):
             vnpy_logger = self.engine.logger
             
-            # 将 Worker 的所有 handler 复制到 vnpy logger
             for handler in self.log.handlers:
-                # 避免重复添加
                 if handler not in vnpy_logger.handlers:
                     if isinstance(handler, RotatingFileHandler):
-                        # 📄 文件处理器：添加三维过滤器
+                        # Add filter to file handler
+                        if not any(isinstance(f, SymbolLogFilter) for f in handler.filters):
+                            symbol_filter = SymbolLogFilter(
+                                user_id=user_id or 'unknown',
+                                strategy_key=strategy_key,
+                                symbol=symbol
+                            )
+                            handler.addFilter(symbol_filter)
+                        vnpy_logger.addHandler(handler)
+                        self.log.info(f"Added file handler to vnpy logger for {symbol}")
+                        
+                    elif isinstance(handler, WebSocketLogHandler):
+                        # Create new WebSocket handler with filter
+                        vnpy_ws_handler = WebSocketLogHandler(handler.log_server)
+                        vnpy_ws_handler.setFormatter(handler.formatter if handler.formatter else fmt)
+                        
                         symbol_filter = SymbolLogFilter(
                             user_id=user_id or 'unknown',
+                            strategy_key=strategy_key,
+                            symbol=symbol
+                        )
+                        vnpy_ws_handler.addFilter(symbol_filter)
+                        
+                        vnpy_logger.addHandler(vnpy_ws_handler)
+                        self.log.info(f"Added WebSocket handler to vnpy logger for {symbol}")
+            
+            vnpy_logger.setLevel(self.log.level)
+            self.log.info(f"✓ Linked vnpy engine logger to Worker handlers ({len(self.log.handlers)} handlers)")
+        else:
+            self.log.warning("⚠️ vnpy engine does not have a logger attribute")
+
                             strategy_key=strategy_key,
                             symbol=symbol
                         )
