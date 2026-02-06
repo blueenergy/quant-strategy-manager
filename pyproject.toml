@@ -23,13 +23,15 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
 ]
 
+# 核心依赖（策略管理）
 dependencies = [
     "pymongo>=4.0.0",
     "python-dateutil>=2.8.0",
-    "websockets>=12.0",  # LogStreamServer 需要
+    "websockets>=12.0",
 ]
 
 [project.optional-dependencies]
+# 开发工具
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -38,17 +40,17 @@ dev = [
     "mypy>=0.990",
 ]
 
-# API 服务器依赖（需要在 vnpy 环境中运行）
+# API 服务器依赖（独立环境运行）
 api = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
-    # 注意：还需要手动安装 vnpy 及其依赖（见 vnpy-live-trading）
+    "PyJWT>=2.8.0",
+    "python-dotenv>=1.0.0",
 ]
 
-# vnpy 引擎适配器（在 vnpy 环境中已安装）
-vnpy = [
-    # vnpy 及其所有依赖应该在 vnpy-live-trading/.venv 中安装
-    # 本项目通过环境隔离使用，不直接声明版本依赖
+# 日志管理（可选）
+logging = [
+    "elasticsearch>=7.0.0,<9.0.0",  # ELK 日志后端（兼容 ES 7/8）
 ]
 
 # backtrader 引擎适配器（用户自行安装）
