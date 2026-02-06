@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()  # 默认加载当前目录的 .env
 load_dotenv('config/.env')  # 也加载 config 目录下的 .env
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import HTMLResponse, FileResponse, PlainTextResponse
 from typing import Dict, Any, Optional
 import sys
@@ -35,15 +35,28 @@ vnpy_path = Path(__file__).parent.parent / "vnpy-live-trading"
 if vnpy_path.exists():
     sys.path.insert(0, str(vnpy_path))
 
-from strategy_manager.core import MultiStrategyOrchestrator
-from strategy_manager.adapters.vnpy_adapter import create_vnpy_worker
-
-# 配置日志
+# 配置日志（在导入其他模块之前）
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# 导入认证模块（使用本地轻量级实现，不依赖 quantFinance）
+try:
+    from simple_auth import get_current_active_user
+    AUTH_AVAILABLE = True
+    logger.info("✅ Authentication enabled (JWT)")
+except ImportError as e:
+    logger.warning(f"⚠️  Auth module not available: {e}")
+    logger.warning("   API will run without authentication (all users see all workers)")
+    AUTH_AVAILABLE = False
+    # 提供一个空的依赖函数
+    async def get_current_active_user():
+        return {"id": "anonymous", "username": "anonymous"}
+
+from strategy_manager.core import MultiStrategyOrchestrator
+from strategy_manager.adapters.vnpy_adapter import create_vnpy_worker
 
 app = FastAPI(
     title="Strategy Manager API",
@@ -53,6 +66,11 @@ app = FastAPI(
 
 # 全局 orchestrator 实例
 orchestrator = None
+
+
+def get_user_id(current_user: dict) -> str:
+    """统一获取用户唯一标识（主键 _id），并转换为字符串"""
+    return str(current_user["id"])
 
 
 def get_public_host():
@@ -77,6 +95,10 @@ def get_public_host():
 async def startup_event():
     """FastAPI 启动时初始化 orchestrator"""
     logger.info("🚀 FastAPI startup - initializing orchestrator...")
+    logger.info(f"🔐 Authentication status: {'ENABLED' if AUTH_AVAILABLE else 'DISABLED (mock mode)'}")
+    if not AUTH_AVAILABLE:
+        logger.warning("⚠️  Running without authentication - all users will be treated as 'anonymous'")
+        logger.warning("⚠️  User filtering will NOT work properly!")
     get_orchestrator()  # 触发初始化
     logger.info("✓ Startup complete")
 
@@ -163,38 +185,56 @@ def get_public_websocket_url(worker_ws_url):
 
 
 @app.get("/api/workers")
-async def list_workers() -> Dict[str, Any]:
-    """获取所有 Workers 及其日志流地址"""
+async def list_workers(current_user: dict = Depends(get_current_active_user)) -> Dict[str, Any]:
+    """获取当前用户的 Workers（根据 user_id 过滤）"""
     orch = get_orchestrator()
     workers_info = {}
     
-    public_host = get_public_host()  # ← 获取公网 IP
+    user_id = get_user_id(current_user)
+    public_host = get_public_host()
     
+    logger.info(f"User {current_user.get('username')} ({user_id}) requesting workers")
+    
+    # 只返回属于当前用户的 workers
     for key, worker in orch.workers.items():
-        worker_data = {
-            "alive": worker.is_alive(),
-            "stats": worker.get_stats() if hasattr(worker, 'get_stats') else {}
-        }
+        config = orch.configurations.get(key)
         
-        # 添加 log stream URL
-        if hasattr(worker, 'get_log_stream_url'):
-            log_url = worker.get_log_stream_url()
-            if log_url:
-                worker_data["log_stream_url"] = get_public_websocket_url(log_url)
-        
-        workers_info[key] = worker_data
+        if config:
+            config_user_id = str(config.user_id) if hasattr(config, 'user_id') else None
+            
+            # 严格匹配：只返回属于当前用户的 workers
+            if config_user_id and config_user_id == user_id:
+                worker_data = {
+                    "alive": worker.is_alive(),
+                    "stats": worker.get_stats() if hasattr(worker, 'get_stats') else {}
+                }
+                
+                # 添加 log stream URL
+                if hasattr(worker, 'get_log_stream_url'):
+                    log_url = worker.get_log_stream_url()
+                    if log_url:
+                        worker_data["log_stream_url"] = get_public_websocket_url(log_url)
+                
+                workers_info[key] = worker_data
     
+    logger.info(f"Returning {len(workers_info)} workers for user {current_user.get('username')}")
     return {"workers": workers_info}
 
 
 @app.get("/api/workers/{worker_key}")
-async def get_worker(worker_key: str) -> Dict[str, Any]:
-    """获取单个 Worker 的详细信息"""
+async def get_worker(worker_key: str, current_user: dict = Depends(get_current_active_user)) -> Dict[str, Any]:
+    """获取单个 Worker 的详细信息（需要验证所有权）"""
     orch = get_orchestrator()
     worker = orch.workers.get(worker_key)
     
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
+    
+    # 验证 worker 是否属于当前用户
+    user_id = get_user_id(current_user)
+    config = orch.configurations.get(worker_key)
+    if not config or not hasattr(config, 'user_id') or str(config.user_id) != user_id:
+        raise HTTPException(status_code=403, detail="Access denied: This worker does not belong to you")
     
     worker_info = {
         "alive": worker.is_alive(),
@@ -211,13 +251,19 @@ async def get_worker(worker_key: str) -> Dict[str, Any]:
 
 
 @app.get("/api/workers/{worker_key}/console")
-async def get_worker_console_url(worker_key: str) -> Dict[str, Any]:
-    """获取 Worker 的控制台 WebSocket URL"""
+async def get_worker_console_url(worker_key: str, current_user: dict = Depends(get_current_active_user)) -> Dict[str, Any]:
+    """获取 Worker 的控制台 WebSocket URL（需要验证所有权）"""
     orch = get_orchestrator()
     worker = orch.workers.get(worker_key)
     
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
+    
+    # 验证 worker 是否属于当前用户
+    user_id = get_user_id(current_user)
+    config = orch.configurations.get(worker_key)
+    if not config or not hasattr(config, 'user_id') or str(config.user_id) != user_id:
+        raise HTTPException(status_code=403, detail="Access denied: This worker does not belong to you")
     
     ws_url = None
     if hasattr(worker, 'get_log_stream_url'):
@@ -234,11 +280,12 @@ async def get_worker_console_url(worker_key: str) -> Dict[str, Any]:
 
 @app.get("/api/workers/{worker_key}/logs")
 @app.head("/api/workers/{worker_key}/logs")
-async def get_worker_log_file(worker_key: str, tail: Optional[int] = None):
-    """获取 Worker 的历史日志文件
+async def get_worker_log_file(worker_key: str, current_user: dict = Depends(get_current_active_user), tail: Optional[int] = None):
+    """获取 Worker 的历史日志文件（需要验证所有权）
     
     Args:
         worker_key: Worker 键值
+        current_user: 当前认证用户
         tail: 如果提供，只返回最后 N 行日志（默认返回全部）
     """
     orch = get_orchestrator()
@@ -249,6 +296,12 @@ async def get_worker_log_file(worker_key: str, tail: Optional[int] = None):
             status_code=404,
             detail=f"❌ Worker '{worker_key}' 不存在"
         )
+    
+    # 验证 worker 是否属于当前用户
+    user_id = get_user_id(current_user)
+    config = orch.configurations.get(worker_key)
+    if not config or not hasattr(config, 'user_id') or str(config.user_id) != user_id:
+        raise HTTPException(status_code=403, detail="Access denied: This worker does not belong to you")
     
     # 获取日志文件路径
     log_file = None
@@ -307,25 +360,41 @@ async def health_check() -> Dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/debug/auth")
+async def debug_auth(current_user: dict = Depends(get_current_active_user)) -> Dict[str, Any]:
+    """调试认证状态（仅用于开发）"""
+    return {
+        "auth_available": AUTH_AVAILABLE,
+        "current_user": current_user,
+        "user_id": get_user_id(current_user)
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     """API 文档"""
-    return """
+    auth_note = "" if AUTH_AVAILABLE else "<p style='color: orange;'>⚠️ Authentication is disabled - running in open mode</p>"
+    return f"""
     <html>
     <head><title>Strategy Manager API</title></head>
     <body>
         <h1>Strategy Manager API Server</h1>
+        {auth_note}
         <p>查看自动生成的 API 文档：<a href="/docs">/docs</a></p>
         <h2>Endpoints:</h2>
         <ul>
-            <li><code>GET /api/workers</code> - 获取所有 Workers</li>
-            <li><code>GET /api/workers/{worker_key}</code> - 获取单个 Worker</li>
-            <li><code>GET /api/workers/{worker_key}/console</code> - 获取控制台 URL</li>
-            <li><code>GET /api/workers/{worker_key}/logs</code> - 获取历史日志文件</li>
-            <li><code>GET /api/workers/{worker_key}/logs?tail=100</code> - 获取最后 N 行日志</li>
+            <li><code>GET /api/workers</code> - 获取当前用户的 Workers（需要JWT认证）</li>
+            <li><code>GET /api/workers/{{worker_key}}</code> - 获取单个 Worker（需要JWT认证和所有权验证）</li>
+            <li><code>GET /api/workers/{{worker_key}}/console</code> - 获取控制台 URL（需要JWT认证和所有权验证）</li>
+            <li><code>GET /api/workers/{{worker_key}}/logs</code> - 获取历史日志文件（需要JWT认证和所有权验证）</li>
+            <li><code>GET /api/workers/{{worker_key}}/logs?tail=100</code> - 获取最后 N 行日志（需要JWT认证和所有权验证）</li>
             <li><code>GET /api/status</code> - 获取整体状态</li>
             <li><code>GET /health</code> - 健康检查</li>
         </ul>
+        <h2>Authentication:</h2>
+        <p>所有 worker 相关接口都需要 JWT Bearer Token 认证。</p>
+        <pre>Authorization: Bearer YOUR_JWT_TOKEN</pre>
+        <p>用户只能访问自己的 workers，无法查看或操作其他用户的 workers。</p>
     </body>
     </html>
     """
@@ -368,14 +437,18 @@ if __name__ == '__main__':
     print("=" * 80)
     print(f"\nMongoDB: {os.getenv('MONGO_URI', 'mongodb://localhost:27017')}")
     print(f"Database: {os.getenv('MONGO_DB', 'finance')}")
+    print(f"\nAuthentication: {'✅ Enabled (JWT)' if AUTH_AVAILABLE else '⚠️  Disabled (Open Mode)'}")
+    if AUTH_AVAILABLE:
+        print("  All worker endpoints require JWT Bearer token authentication")
+        print("  Users can only access their own workers")
     print(f"\nAPI Server: http://0.0.0.0:{port}")
     print(f"API Docs: http://0.0.0.0:{port}/docs")
     print("\nEndpoints:")
-    print("  • GET  /api/workers")
-    print("  • GET  /api/workers/{worker_key}")
-    print("  • GET  /api/workers/{worker_key}/console")
-    print("  • GET  /api/workers/{worker_key}/logs")
-    print("  • GET  /api/workers/{worker_key}/logs?tail=100")
+    print("  • GET  /api/workers                         (JWT required)")
+    print("  • GET  /api/workers/{worker_key}            (JWT required)")
+    print("  • GET  /api/workers/{worker_key}/console    (JWT required)")
+    print("  • GET  /api/workers/{worker_key}/logs       (JWT required)")
+    print("  • GET  /api/workers/{worker_key}/logs?tail=100 (JWT required)")
     print("  • GET  /api/status")
     print("  • GET  /health")
     print("\n" + "=" * 80 + "\n")

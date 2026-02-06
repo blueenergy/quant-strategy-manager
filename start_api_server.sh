@@ -20,27 +20,33 @@ echo -e "${BLUE}Strategy Manager API Server${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
-# 1. 检查 vnpy 虚拟环境
-VNPY_VENV="/home/shuyolin/trading/vnpy-live-trading/.venv"
+# 获取脚本所在目录
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-if [ ! -d "$VNPY_VENV" ]; then
-    echo -e "${YELLOW}⚠️  vnpy 虚拟环境不存在: $VNPY_VENV${NC}"
+# 1. 检查 quant-strategy-manager 虚拟环境
+API_VENV="$SCRIPT_DIR/.venv"
+
+if [ ! -d "$API_VENV" ]; then
+    echo -e "${RED}❌ quant-strategy-manager 虚拟环境不存在: $API_VENV${NC}"
+    echo -e "${YELLOW}请先运行初始化脚本：${NC}"
+    echo -e "  cd $SCRIPT_DIR"
+    echo -e "  bash init_env.sh"
     exit 1
 fi
 
-echo -e "${GREEN}✓${NC} 找到 vnpy 虚拟环境: $VNPY_VENV"
+echo -e "${GREEN}✓${NC} 找到虚拟环境: $API_VENV"
 
-# 2. 激活虚拟环境（使用绝对路径）
+# 2. 激活虚拟环境
 echo -e "${GREEN}✓${NC} 激活虚拟环境..."
-source "$VNPY_VENV/bin/activate"
+source "$API_VENV/bin/activate"
 
 # 3. 验证 Python 环境
 PYTHON_PATH=$(which python)
 echo -e "${GREEN}✓${NC} Python 路径: $PYTHON_PATH"
 
-# 4. 检查 vnpy-live-trading 依赖
-echo -e "${BLUE}检查 vnpy-live-trading 依赖...${NC}"
-VNPY_DEPS_MISSING=0
+# 4. 检查关键依赖
+echo -e "${BLUE}检查依赖...${NC}"
+DEPS_MISSING=0
 
 check_package() {
     local pkg=$1
@@ -51,39 +57,21 @@ check_package() {
         echo -e "  ${GREEN}✓${NC} $display_name ${version}"
     else
         echo -e "  ${RED}✗${NC} $display_name (缺失)"
-        VNPY_DEPS_MISSING=1
+        DEPS_MISSING=1
     fi
 }
 
-check_package "vnpy" "vnpy"
-check_package "vnpy_ctastrategy" "vnpy_ctastrategy"
-check_package "pymongo" "pymongo"
-check_package "websockets" "websockets"
-
-if [ $VNPY_DEPS_MISSING -eq 1 ]; then
-    echo ""
-    echo -e "${RED}⚠️  vnpy 环境缺少依赖！${NC}"
-    echo -e "${YELLOW}请在 vnpy 环境中安装：${NC}"
-    echo -e "  cd ~/trading/vnpy-live-trading"
-    echo -e "  source .venv/bin/activate"
-    echo -e "  pip install -r requirements.txt"
-    exit 1
-fi
-
-# 5. 检查 quant-strategy-manager API Server 依赖
-echo ""
-echo -e "${BLUE}检查 API Server 依赖...${NC}"
-API_DEPS_MISSING=0
-
 check_package "fastapi" "fastapi"
 check_package "uvicorn" "uvicorn"
+check_package "jwt" "PyJWT"
+check_package "pymongo" "pymongo"
+check_package "strategy_manager" "vnpy-live-trading"
 
-if [ $API_DEPS_MISSING -eq 1 ]; then
+if [ $DEPS_MISSING -eq 1 ]; then
     echo ""
-    echo -e "${RED}⚠️  API Server 依赖缺失！${NC}"
-    echo -e "${YELLOW}请安装 API Server 依赖：${NC}"
-    echo -e "  cd ~/trading/quant-strategy-manager"
-    echo -e "  pip install -r requirements-api.txt"
+    echo -e "${RED}⚠️  依赖缺失！${NC}"
+    echo -e "${YELLOW}请运行初始化脚本：${NC}"
+    echo -e "  bash init_env.sh"
     exit 1
 fi
 
@@ -101,8 +89,7 @@ echo "   MONGO_URI=$MONGO_URI"
 echo "   MONGO_DB=$MONGO_DB"
 echo ""
 
-# 7. 进入 quant-strategy-manager 目录
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# 7. 进入工作目录
 cd "$SCRIPT_DIR"
 
 echo -e "${GREEN}✓${NC} 工作目录: $(pwd)"
@@ -110,11 +97,14 @@ echo ""
 
 # 8. 启动 API Server
 echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}🚀 启动 API Server...${NC}"
+echo -e "${BLUE}🚀 启动 API Server (开发模式 - 自动重载)${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
+echo -e "${GREEN}✓${NC} 启动命令: uvicorn api_server:app --host 0.0.0.0 --port $API_PORT --reload"
+echo -e "${YELLOW}💡 提示: 修改代码后会自动重启服务器${NC}"
+echo ""
 
-python api_server.py
+uvicorn api_server:app --host 0.0.0.0 --port $API_PORT --reload
 
 # 清理（如果 Ctrl+C）
 echo ""
