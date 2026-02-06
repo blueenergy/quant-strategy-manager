@@ -108,22 +108,29 @@ class VnpyWorkerAdapter(StrategyWorker):
         if not self.log.handlers:
             fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
             
-            # Console handler (always present for debugging)
-            console_handler = logging.StreamHandler()
-            console_handler.setFormatter(fmt)
-            self.log.addHandler(console_handler)
-            
-            # Setup file or remote backend based on configuration
+            # Setup file or remote backend based on configuration (do this FIRST)
             try:
-                backend_handler = LogConfig.setup_logger(
-                    name=self.log.name,
+                # Create logger with LogConfig (returns logger with handlers)
+                config_logger = LogConfig.setup_logger(
+                    logger_name=self.log.name,
                     log_file=str(self.log_file)
-                ).handlers[0] if LogConfig.setup_logger(
-                    name=self.log.name,
-                    log_file=str(self.log_file)
-                ).handlers else None
+                )
                 
-                if backend_handler is None:
+                # Get the backend handler from config logger
+                backend_handlers = [h for h in config_logger.handlers if not isinstance(h, logging.StreamHandler)]
+                
+                if backend_handlers:
+                    # Use the configured handler(s)
+                    for backend_handler in backend_handlers:
+                        # Add filter to backend handler
+                        symbol_filter = SymbolLogFilter(
+                            user_id=user_id or 'unknown',
+                            strategy_key=strategy_key,
+                            symbol=symbol
+                        )
+                        backend_handler.addFilter(symbol_filter)
+                        self.log.addHandler(backend_handler)
+                else:
                     # Fallback to file handler if config fails
                     file_handler = RotatingFileHandler(
                         self.log_file,
@@ -132,20 +139,35 @@ class VnpyWorkerAdapter(StrategyWorker):
                         encoding='utf-8'
                     )
                     file_handler.setFormatter(fmt)
-                    backend_handler = file_handler
+                    
+                    symbol_filter = SymbolLogFilter(
+                        user_id=user_id or 'unknown',
+                        strategy_key=strategy_key,
+                        symbol=symbol
+                    )
+                    file_handler.addFilter(symbol_filter)
+                    self.log.addHandler(file_handler)
                 
-                # Add filter to backend handler
-                symbol_filter = SymbolLogFilter(
-                    user_id=user_id or 'unknown',
-                    strategy_key=strategy_key,
-                    symbol=symbol
-                )
-                backend_handler.addFilter(symbol_filter)
-                self.log.addHandler(backend_handler)
-                
-                self.log.info(f"Logging configured (backend: {LogConfig.get_config().get('type', 'file')})")
+                self.log.info(f"Logging configured")
             except Exception as e:
                 self.log.warning(f"Failed to setup logging backend: {e}")
+                # Ensure at least file handler exists
+                try:
+                    file_handler = RotatingFileHandler(
+                        self.log_file,
+                        maxBytes=10*1024*1024,
+                        backupCount=5,
+                        encoding='utf-8'
+                    )
+                    file_handler.setFormatter(fmt)
+                    self.log.addHandler(file_handler)
+                except Exception as fallback_error:
+                    self.log.error(f"Fallback file handler also failed: {fallback_error}")
+            
+            # Console handler (add AFTER LogConfig to avoid interfering)
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(fmt)
+            self.log.addHandler(console_handler)
             
             # WebSocket log streaming (dynamic port) for real-time monitoring
             try:
@@ -208,36 +230,6 @@ class VnpyWorkerAdapter(StrategyWorker):
             self.log.info(f"✓ Linked vnpy engine logger to Worker handlers ({len(self.log.handlers)} handlers)")
         else:
             self.log.warning("⚠️ vnpy engine does not have a logger attribute")
-
-                            strategy_key=strategy_key,
-                            symbol=symbol
-                        )
-                        handler.addFilter(symbol_filter)
-                        vnpy_logger.addHandler(handler)
-                        self.log.info(f"Added filtered file handler to vnpy logger for {symbol}")
-                        
-                    elif isinstance(handler, WebSocketLogHandler):
-                        # 🌐 为 vnpy logger 创建新的 WebSocket handler，带三维过滤器
-                        vnpy_ws_handler = WebSocketLogHandler(handler.log_server)
-                        vnpy_ws_handler.setFormatter(handler.formatter if handler.formatter else fmt)
-                        
-                        # 添加三维过滤器
-                        symbol_filter = SymbolLogFilter(
-                            user_id=user_id or 'unknown',
-                            strategy_key=strategy_key,
-                            symbol=symbol
-                        )
-                        vnpy_ws_handler.addFilter(symbol_filter)
-                        
-                        vnpy_logger.addHandler(vnpy_ws_handler)
-                        self.log.info(f"Added filtered WebSocket handler to vnpy logger for {symbol}")
-            
-            # 确保日志级别一致
-            vnpy_logger.setLevel(self.log.level)
-            
-            self.log.info(f"✓ Linked vnpy engine logger to Worker handlers ({len(self.log.handlers)} handlers)")
-        else:
-            self.log.warning("⚠️ vnpy engine does not have a logger attribute, engine logs may not be captured")
         
         self.bars_processed = 0
     
