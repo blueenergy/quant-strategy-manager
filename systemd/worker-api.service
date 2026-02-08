@@ -12,19 +12,24 @@ User=shuyolin
 Group=shuyolin
 WorkingDirectory=/home/shuyolin/trading/quant-strategy-manager
 
-# 使用 vnpy 虚拟环境的 Python
-Environment="PATH=/home/shuyolin/trading/vnpy-live-trading/.venv/bin:/usr/local/bin:/usr/bin"
+# 使用 quant-strategy-manager 自己的虚拟环境
+Environment="PATH=/home/shuyolin/trading/quant-strategy-manager/.venv/bin:/usr/local/bin:/usr/bin"
 Environment="PYTHONPATH=/home/shuyolin/trading/quant-strategy-manager/src"
 
-# MongoDB 配置（可选）
-Environment="MONGO_URI=mongodb://localhost:27017"
-Environment="MONGO_DB=finance"
+# 从 .env 文件加载环境变量（systemd 会自动读取）
+EnvironmentFile=/home/shuyolin/trading/quant-strategy-manager/.env
 
-# 日志配置
-Environment="ENABLE_MONGO_LOGS=false"
+# 如果需要覆盖 .env 中的某些值，可以在这里设置
+# Environment="API_PORT=5001"
+# Environment="MONGO_URI=mongodb://localhost:27017"
+# Environment="MONGO_DB=finance"
 
-# 启动命令
-ExecStart=/home/shuyolin/trading/vnpy-live-trading/.venv/bin/python api_server.py
+# 启动命令：使用 uvicorn（生产环境不使用 --reload）
+ExecStart=/home/shuyolin/trading/quant-strategy-manager/.venv/bin/uvicorn api_server:app --host 0.0.0.0 --port ${API_PORT}
+
+# 优雅关闭：发送 SIGTERM，等待 30 秒
+KillSignal=SIGTERM
+TimeoutStopSec=30
 
 # 重启策略
 Restart=always
