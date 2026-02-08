@@ -41,6 +41,27 @@ class StrategyConfig:
             # Legacy support: read engine_class from DB if present
             engine_class=doc.get("engine_class"),
         )
+    
+    def get_hash(self) -> str:
+        """Compute hash of configuration content for change detection."""
+        import hashlib
+        import json
+        
+        # Create a dictionary of relevant fields
+        data = {
+            "symbol": self.symbol,
+            "strategy_key": self.strategy_key,
+            "params": self.params,
+            "enabled": self.enabled,
+            "user_id": self.user_id,
+            "engine": self.engine,
+            # engine_class might be None, so handle it
+            "engine_class": self.engine_class,
+        }
+        
+        # Sort keys for consistent JSON serialization
+        json_str = json.dumps(data, sort_keys=True, default=str)
+        return hashlib.sha256(json_str.encode('utf-8')).hexdigest()
 
 
 class MultiStrategyOrchestrator:
@@ -119,8 +140,12 @@ class MultiStrategyOrchestrator:
             f"Orchestrator initialized | db={self.mongo_db} collection={self.config_collection}"
         )
     
-    def load_configurations(self) -> int:
-        """Load strategy configurations from database."""
+    def load_configurations(self) -> Dict[str, StrategyConfig]:
+        """Load strategy configurations from database.
+        
+        Returns:
+            Dict mapping worker_key -> StrategyConfig
+        """
         self.log.info("Loading strategy configurations from database")
         
         try:
@@ -148,41 +173,77 @@ class MultiStrategyOrchestrator:
                 key = f"{config.user_id}_{config.symbol}_{config.strategy_key}"
                 new_configs[key] = config
                 
-                self.log.info(
-                    f"Loaded config: {config.symbol} | strategy={config.strategy_key} | "
-                    f"engine={config.engine}"
-                )
+                # self.log.info(
+                #     f"Loaded config: {config.symbol} | strategy={config.strategy_key} | "
+                #     f"engine={config.engine}"
+                # )
             
-            self.configurations = new_configs
-            self.log.info(f"Loaded {len(self.configurations)} enabled strategy configurations")
+            # Note: We do NOT update self.configurations here anymore.
+            # That happens in sync_workers to ensure atomic updates.
+            self.log.info(f"Loaded {len(new_configs)} enabled strategy configurations from DB")
             
-            return len(self.configurations)
+            return new_configs
             
         except Exception as e:
             self.log.error(f"Failed to load configurations: {e}", exc_info=True)
-            return 0
+            return {}
     
-    def sync_workers(self):
-        """Synchronize workers with current configurations."""
-        current_keys = set(self.workers.keys())
-        target_keys = set(self.configurations.keys())
+    def sync_workers(self, new_configs: Optional[Dict[str, StrategyConfig]] = None):
+        """Synchronize workers with current configurations.
         
-        # Workers to stop
+        Args:
+            new_configs: Optional new configuration dict. If None, uses existing self.configurations
+                         (but that won't trigger restarts for modified configs).
+        """
+        if new_configs is None:
+            new_configs = self.configurations
+            
+        current_keys = set(self.workers.keys())
+        target_keys = set(new_configs.keys())
+        
+        # 1. Stop removed workers
         to_stop = current_keys - target_keys
         for key in to_stop:
-            self.log.info(f"Stopping worker for removed config: {key}")
+            self.log.info(f"Stopping worker (removed from config): {key}")
             self._stop_worker(key)
         
-        # Workers to start
-        to_start = target_keys - current_keys
+        # 2. Restart modified workers
+        # Check keys present in both, but with different config hash
+        common_keys = current_keys & target_keys
+        to_restart = []
+        
+        for key in common_keys:
+            old_config = self.configurations.get(key)
+            new_config = new_configs.get(key)
+            
+            if old_config and new_config:
+                if old_config.get_hash() != new_config.get_hash():
+                    self.log.info(f"Configuration changed for {key}, restarting worker...")
+                    self.log.info(f"Old hash: {old_config.get_hash()[:8]} -> New hash: {new_config.get_hash()[:8]}")
+                    to_restart.append(key)
+        
+        for key in to_restart:
+            self._stop_worker(key)
+            # Remove from current_keys so it gets picked up by start logic if needed? 
+            # No, just stop it here. The start logic below acts on target_keys - current_running_keys.
+            # But we just stopped it, so we need to make sure we treat it as "not running".
+            
+        # Update internal configuration state
+        self.configurations = new_configs
+        
+        # 3. Start new (or restarted) workers
+        # Refresh current running keys after stops
+        running_keys = set(self.workers.keys())
+        to_start = target_keys - running_keys
+        
         for key in to_start:
             config = self.configurations[key]
-            self.log.info(f"Starting new worker: {config.symbol} | {config.engine}")
+            self.log.info(f"Starting worker: {config.symbol} | {config.engine}")
             self._start_worker(key, config)
         
         self.log.info(
             f"Worker sync complete | running={len(self.workers)} "
-            f"stopped={len(to_stop)} started={len(to_start)}"
+            f"stopped={len(to_stop)} restarted={len(to_restart)} started={len(to_start)}"
         )
     
     def _start_worker(self, key: str, config: StrategyConfig):
@@ -275,12 +336,13 @@ class MultiStrategyOrchestrator:
         """Load configurations and start all workers."""
         self.log.info("Starting all workers")
         
-        count = self.load_configurations()
-        if count == 0:
+        new_configs = self.load_configurations()
+        if not new_configs:
             self.log.warning("No active configurations found")
-            return
+            # Don't return, keep running to allow adding configs later?
+            # Actually if count is 0, we still sync (which stops everything)
         
-        self.sync_workers()
+        self.sync_workers(new_configs)
         
         # Start monitoring thread if auto-reload enabled
         if self.auto_reload_interval > 0:
@@ -299,12 +361,12 @@ class MultiStrategyOrchestrator:
                 if self._stop_event.wait(timeout=self.auto_reload_interval):
                     break
                 
-                old_count = len(self.configurations)
-                new_count = self.load_configurations()
+                new_configs = self.load_configurations()
                 
-                if new_count != old_count:
-                    self.log.info(f"Configuration changed: {old_count} -> {new_count}")
-                    self.sync_workers()
+                # Always sync. sync_workers handles logic to check if anything actually changed (hashes).
+                # But to save polling overhead we could check hashes here first.
+                # Simplest is to just call sync_workers(new_configs) which does the diff.
+                self.sync_workers(new_configs)
                 
             except Exception as e:
                 self.log.error(f"Error in monitor loop: {e}", exc_info=True)

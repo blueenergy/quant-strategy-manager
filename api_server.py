@@ -128,26 +128,13 @@ def get_orchestrator():
             mongo_uri=os.getenv("MONGO_URI", "mongodb://localhost:27017"),
             mongo_db=os.getenv("MONGO_DB", "finance"),
             config_collection="watchlist_strategies",
-            auto_reload_interval=int(os.getenv("AUTO_RELOAD_INTERVAL", "60")),
+            auto_reload_interval=int(os.getenv("AUTO_RELOAD_INTERVAL", "30")),
         )
         
-        # 加载配置并启动 workers
-        logger.info("Loading strategy configurations from database...")
-        config_count = orchestrator.load_configurations()
-        logger.info(f"✓ Loaded {config_count} strategy configurations")
-        
-        # 显示配置详情
-        if config_count > 0:
-            logger.info("Configuration details:")
-            for key, config in orchestrator.configurations.items():
-                logger.info(f"  - {key}: {config.symbol} | {config.strategy_key} | engine={config.engine}")
-        else:
-            logger.warning("⚠️  No enabled configurations found in database!")
-        
-        # 同步 workers
-        logger.info("Syncing workers...")
-        orchestrator.sync_workers()
-        logger.info(f"✓ {len(orchestrator.workers)} workers active")
+        # 启动所有 workers 并开启监控
+        logger.info("Starting all workers and monitoring...")
+        orchestrator.start_all()
+        logger.info(f"✓ {len(orchestrator.workers)} workers active, monitoring enabled")
         
         # 显示 worker 详情
         if orchestrator.workers:
@@ -157,6 +144,7 @@ def get_orchestrator():
                 logger.info(f"  - {worker_key}: {status}")
         else:
             logger.warning("⚠️  No workers started!")
+
     
     return orchestrator
 
@@ -430,7 +418,7 @@ atexit.register(cleanup_orchestrator)          # 进程退出时
 if __name__ == '__main__':
     import uvicorn
     
-    port = int(os.getenv('API_PORT', '5000'))
+    port = int(os.getenv('API_PORT', '5001'))
     
     print("=" * 80)
     print("Strategy Manager API Server (FastAPI)")
