@@ -388,31 +388,29 @@ async def index():
     """
 
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    """FastAPI 关闭时清理 orchestrator"""
+    logger.info("🛑 FastAPI shutdown event triggered")
+    cleanup_orchestrator()
+    logger.info("✓ Shutdown complete")
+
+
 def cleanup_orchestrator():
     """清理 orchestrator 资源"""
     global orchestrator
     if orchestrator:
         logger.info("🛑 Shutting down orchestrator...")
         try:
-            orchestrator.stop_all()  # ✅ 正确的方法名
+            orchestrator.stop_all()
             logger.info("✓ Orchestrator stopped gracefully")
+        except KeyboardInterrupt:
+            # 忽略清理过程中的 KeyboardInterrupt
+            logger.info("⚠️  Cleanup interrupted, forcing shutdown...")
         except Exception as e:
-            logger.error(f"Error during orchestrator shutdown: {e}")
-        orchestrator = None
-
-
-def signal_handler(signum, frame):
-    """信号处理器 - 优雅关闭"""
-    sig_name = signal.Signals(signum).name
-    logger.info(f"\n🛑 Received signal {sig_name} ({signum}), shutting down...")
-    cleanup_orchestrator()
-    sys.exit(0)
-
-
-# 注册信号处理器
-signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
-signal.signal(signal.SIGTERM, signal_handler)  # kill
-atexit.register(cleanup_orchestrator)          # 进程退出时
+            logger.error(f"Error during orchestrator shutdown: {e}", exc_info=True)
+        finally:
+            orchestrator = None
 
 
 if __name__ == '__main__':
