@@ -164,9 +164,13 @@ def get_public_websocket_url(worker_ws_url):
     # 生产环境使用 Nginx 代理路径
     use_nginx = os.getenv('USE_NGINX_WEBSOCKET', 'false').lower() == 'true'
     
+    # 检查是否使用 HTTPS（决定使用 ws:// 还是 wss://）
+    use_https = os.getenv('USE_HTTPS', 'false').lower() == 'true'
+    ws_protocol = 'wss' if use_https else 'ws'
+    
     if use_nginx:
         # 通过 Nginx /ws/{port} 路径
-        return f"ws://{public_host}/ws/{port}"
+        return f"{ws_protocol}://{public_host}/ws/{port}"
     else:
         # 直接 WebSocket（开发环境）
         return worker_ws_url.replace('0.0.0.0', public_host).replace('localhost', public_host)
