@@ -78,7 +78,20 @@ fi
 echo -e "${GREEN}✓${NC} 所有依赖检查通过"
 echo ""
 
-# 6. 设置环境变量（可选）
+# 5. 加载 .env 文件
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    echo -e "${GREEN}✓${NC} 加载 .env 文件..."
+    # 使用 set -a 自动导出所有变量
+    set -a
+    source <(grep -v '^#' "$SCRIPT_DIR/.env" | grep -v '^$' | sed 's/\r$//')
+    set +a
+    echo -e "${GREEN}✓${NC} .env 文件加载完成"
+else
+    echo -e "${YELLOW}⚠️${NC}  未找到 .env 文件，使用默认配置"
+fi
+echo ""
+
+# 6. 设置环境变量（可选，提供默认值）
 export API_PORT="${API_PORT:-5000}"
 export MONGO_URI="${MONGO_URI:-mongodb://localhost:27017}"
 export MONGO_DB="${MONGO_DB:-finance}"
