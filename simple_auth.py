@@ -52,5 +52,5 @@ async def get_current_active_user(credentials: HTTPAuthorizationCredentials = De
             detail="Token has expired",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    except jwt.JWTError:
+    except jwt.PyJWTError:
         raise credentials_exception
