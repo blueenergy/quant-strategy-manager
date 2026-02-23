@@ -7,7 +7,12 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# 1. Install vnpy-live-trading dependencies
+# 1. Install data-access-lib
+COPY data-access-lib/ /app/data-access-lib/
+WORKDIR /app/data-access-lib
+RUN pip install --no-cache-dir -e .
+
+# 2. Install vnpy-live-trading dependencies
 COPY vnpy-live-trading/ /app/vnpy-live-trading/
 WORKDIR /app/vnpy-live-trading
 RUN pip install --no-cache-dir -e .
