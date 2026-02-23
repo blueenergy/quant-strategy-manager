@@ -7,13 +7,18 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy project files
-COPY pyproject.toml .
-COPY src/ ./src/
-COPY api_server.py .
-COPY simple_auth.py .
+# 1. Install vnpy-live-trading dependencies
+COPY vnpy-live-trading/ /app/vnpy-live-trading/
+WORKDIR /app/vnpy-live-trading
+RUN pip install --no-cache-dir -e .
 
-# Install the package with API dependencies
+# 2. Install quant-strategy-manager dependencies
+WORKDIR /app/quant-strategy-manager
+COPY quant-strategy-manager/pyproject.toml .
+COPY quant-strategy-manager/src/ ./src/
+COPY quant-strategy-manager/api_server.py .
+COPY quant-strategy-manager/simple_auth.py .
+
 RUN pip install --no-cache-dir -e ".[api]"
 
 # Create logs directory
