@@ -21,7 +21,8 @@ RUN pip install --no-cache-dir --prefix=/install -e .
 
 # 3. Install quant-strategy-manager
 WORKDIR /app
-COPY quant-strategy-manager/pyproject.toml quant-strategy-manager/src/ quant-strategy-manager/api_server.py quant-strategy-manager/simple_auth.py ./
+COPY quant-strategy-manager/pyproject.toml quant-strategy-manager/README.md quant-strategy-manager/api_server.py quant-strategy-manager/simple_auth.py ./
+COPY quant-strategy-manager/src ./src
 RUN pip install --no-cache-dir --prefix=/install -e ".[api]"
 
 # Stage 2: Runtime image (no build tools)
