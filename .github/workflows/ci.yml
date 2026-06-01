@@ -65,25 +65,23 @@ jobs:
           export PYTHONPATH=$(pwd)/src
           pytest --maxfail=1 --disable-warnings -v test_config_loader.py test_user_filtering.py || echo "No tests found or tests failed, continuing for now"
 
-  docker:
-    name: Build & Push Docker image (ghcr.io + ACR)
+  docker-build:
+    name: Build & Push Arch Image
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
     needs: [build]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
     steps:
       - name: Checkout quant-strategy-manager
         uses: actions/checkout@v4
         with:
           path: quant-strategy-manager
-
-      - name: Validate dependency repo token
-        env:
-          DEPENDENCY_REPO_TOKEN: ${{ secrets.DEPENDENCY_REPO_TOKEN }}
-        run: |
-          if [ -z "$DEPENDENCY_REPO_TOKEN" ]; then
-            echo "DEPENDENCY_REPO_TOKEN is required to checkout private dependency repositories."
-            exit 1
-          fi
 
       - name: Checkout data-access-lib
         uses: actions/checkout@v4
@@ -98,9 +96,6 @@ jobs:
           repository: blueenergy/vnpy-live-trading
           path: vnpy-live-trading
           token: ${{ secrets.DEPENDENCY_REPO_TOKEN }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -127,26 +122,72 @@ jobs:
             ghcr.io/blueenergy/quant-strategy-manager
             crpi-gv3f6mfcrw75qane.cn-hangzhou.personal.cr.aliyuncs.com/wukongquant/quant-strategy-manager
           tags: |
-            type=sha,prefix=sha-,format=short
-            type=raw,value=latest
+            type=sha,prefix=sha-,format=short,suffix=-${{ matrix.arch }}
+            type=raw,value=latest-${{ matrix.arch }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           file: quant-strategy-manager/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/${{ matrix.arch }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=build-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=build-${{ matrix.arch }}
+
+  docker-manifest:
+    name: Merge Manifests
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [docker-build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Aliyun Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: crpi-gv3f6mfcrw75qane.cn-hangzhou.personal.cr.aliyuncs.com
+          username: ${{ secrets.ALIYUN_USER }}
+          password: ${{ secrets.ALIYUN_TOKEN }}
+
+      - name: Create and push manifests
+        run: |
+          SHA_TAG="sha-${GITHUB_SHA::7}"
+          
+          # GHCR
+          docker manifest create ghcr.io/blueenergy/quant-strategy-manager:latest \
+            ghcr.io/blueenergy/quant-strategy-manager:latest-amd64 \
+            ghcr.io/blueenergy/quant-strategy-manager:latest-arm64
+          docker manifest push ghcr.io/blueenergy/quant-strategy-manager:latest
+          
+          docker manifest create ghcr.io/blueenergy/quant-strategy-manager:$SHA_TAG \
+            ghcr.io/blueenergy/quant-strategy-manager:$SHA_TAG-amd64 \
+            ghcr.io/blueenergy/quant-strategy-manager:$SHA_TAG-arm64
+          docker manifest push ghcr.io/blueenergy/quant-strategy-manager:$SHA_TAG
+
+          # ACR
+          docker manifest create crpi-gv3f6mfcrw75qane.cn-hangzhou.personal.cr.aliyuncs.com/wukongquant/quant-strategy-manager:latest \
+            crpi-gv3f6mfcrw75qane.cn-hangzhou.personal.cr.aliyuncs.com/wukongquant/quant-strategy-manager:latest-amd64 \
+            crpi-gv3f6mfcrw75qane.cn-hangzhou.personal.cr.aliyuncs.com/wukongquant/quant-strategy-manager:latest-arm64
+          docker manifest push crpi-gv3f6mfcrw75qane.cn-hangzhou.personal.cr.aliyuncs.com/wukongquant/quant-strategy-manager:latest
+          
+          docker manifest create crpi-gv3f6mfcrw75qane.cn-hangzhou.personal.cr.aliyuncs.com/wukongquant/quant-strategy-manager:$SHA_TAG \
+            crpi-gv3f6mfcrw75qane.cn-hangzhou.personal.cr.aliyuncs.com/wukongquant/quant-strategy-manager:$SHA_TAG-amd64 \
+            crpi-gv3f6mfcrw75qane.cn-hangzhou.personal.cr.aliyuncs.com/wukongquant/quant-strategy-manager:$SHA_TAG-arm64
+          docker manifest push crpi-gv3f6mfcrw75qane.cn-hangzhou.personal.cr.aliyuncs.com/wukongquant/quant-strategy-manager:$SHA_TAG
 
   deploy:
     name: Deploy to VolcEngine (docker pull from ACR)
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
-    needs: [build, docker]
+    needs: [docker-manifest]
     steps:
       - name: Set up SSH key
         run: |
