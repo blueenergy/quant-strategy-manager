@@ -7,6 +7,7 @@ Works with any StrategyWorker implementation (backtrader, vnpy, etc.)
 import logging
 import threading
 import time
+import importlib.util
 from typing import Dict, Optional, Any, Callable
 from dataclasses import dataclass
 from pymongo import MongoClient
@@ -107,7 +108,7 @@ class MultiStrategyOrchestrator:
             auto_reload_interval: Config reload interval in seconds (0 to disable)
         """
         self.worker_factories = worker_factories
-        self.mongo_uri = mongo_uri or os.getenv("MONGO_URL", "mongodb://localhost:27017")
+        self.mongo_uri = mongo_uri or os.getenv("MONGO_URI", "mongodb://localhost:27017")
         self.mongo_db = mongo_db or os.getenv("MONGO_DB", "finance")
         self.config_collection = config_collection
         self.user_id = user_id
@@ -283,6 +284,15 @@ class MultiStrategyOrchestrator:
                     self.log.error(
                         f"Unknown vnpy strategy '{config.strategy_key}'. "
                         f"Please register in strategy_registry.py or add engine_class to DB."
+                    )
+                    return
+                
+                module_path = engine_class_path.rsplit(".", 1)[0]
+                module_spec = importlib.util.find_spec(module_path) if module_path else None
+                if not module_spec:
+                    self.log.error(
+                        f"Skipping vnpy strategy '{config.strategy_key}' for {config.symbol}: "
+                        f"engine module '{module_path}' is not available in the container."
                     )
                     return
                 
