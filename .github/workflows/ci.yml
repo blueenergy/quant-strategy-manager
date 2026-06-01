@@ -236,6 +236,7 @@ jobs:
             --restart unless-stopped \
             --network quant-network \
             --add-host=host.docker.internal:host-gateway \
+            --env-file /home/deployuser/quantFinance/.env \
             -p 5001:5000 \
             -e TZ=Asia/Shanghai \
             -e API_PORT=5000 \
