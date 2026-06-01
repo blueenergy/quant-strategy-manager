@@ -177,7 +177,7 @@ jobs:
           timeout 300 docker pull "$IMAGE"
 
           log_step "Preparing shared directories"
-          mkdir -p /home/deployuser/quant-strategy-manager/logs /home/deployuser/vnpy-live-trading /home/deployuser/data-access-lib
+          mkdir -p /home/deployuser/quant-strategy-manager/logs
 
           log_step "Stopping existing container"
           timeout 30 docker stop -t 20 quant-strategy-manager 2>/dev/null || true
@@ -197,8 +197,6 @@ jobs:
             --log-opt max-file=3 \
             -v /home/deployuser/quantFinance/.env:/app/.env:ro \
             -v /home/deployuser/quant-strategy-manager/logs:/app/quant-strategy-manager/logs \
-            -v /home/deployuser/vnpy-live-trading:/app/vnpy-live-trading \
-            -v /home/deployuser/data-access-lib:/app/data-access-lib \
             "$IMAGE"
 
           log_step "Listing deployed containers"
