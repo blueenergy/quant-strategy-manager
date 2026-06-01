@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout quant-strategy-manager
         uses: actions/checkout@v4
@@ -68,7 +68,7 @@ jobs:
   docker:
     name: Build & Push Docker image (ghcr.io + ACR)
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     needs: [build]
     steps:
       - name: Checkout quant-strategy-manager
@@ -145,7 +145,7 @@ jobs:
   deploy:
     name: Deploy to VolcEngine (docker pull from ACR)
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     needs: [build, docker]
     steps:
       - name: Set up SSH key
