@@ -137,11 +137,16 @@ def cmd_start(args):
                     # Get appropriate factory
                     factory = worker_factories.get(config_obj.engine)
                     if factory:
+                        account_params = orchestrator._resolve_account_params(
+                            config_obj.user_id,
+                            config_obj.securities_account_id,
+                        )
                         worker_config = {
                             'symbol': config_obj.symbol,
                             'strategy_key': config_obj.strategy_key,
-                            'params': config_obj.params,
+                            'params': {**config_obj.params, **account_params},
                             'user_id': config_obj.user_id,
+                            **account_params,
                         }
                         
                         # Add engine-specific fields

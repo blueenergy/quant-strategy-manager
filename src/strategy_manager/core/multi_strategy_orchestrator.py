@@ -10,6 +10,8 @@ import time
 import importlib.util
 from typing import Dict, Optional, Any, Callable
 from dataclasses import dataclass
+from bson import ObjectId
+from bson.errors import InvalidId
 from pymongo import MongoClient
 import os
 
@@ -25,6 +27,7 @@ class StrategyConfig:
     params: Dict[str, Any]
     enabled: bool
     user_id: Optional[str] = None
+    securities_account_id: Optional[str] = None
     engine: str = "backtrader"  # "backtrader" or "vnpy"
     # Note: engine_class is deprecated - use strategy_registry instead
     engine_class: Optional[str] = None  # Legacy field, will be auto-resolved
@@ -32,12 +35,15 @@ class StrategyConfig:
     @classmethod
     def from_db_doc(cls, doc: Dict) -> 'StrategyConfig':
         """Create from database document."""
+        params = doc.get("params", {}) or {}
+        securities_account_id = doc.get("securities_account_id") or params.get("securities_account_id")
         return cls(
             symbol=doc.get("symbol", ""),
             strategy_key=doc.get("strategy_key", ""),
-            params=doc.get("params", {}),
+            params=params,
             enabled=doc.get("enabled", True),
             user_id=str(doc.get("user_id")) if doc.get("user_id") is not None else None,
+            securities_account_id=str(securities_account_id) if securities_account_id is not None else None,
             engine=doc.get("engine", "backtrader"),
             # Legacy support: read engine_class from DB if present
             engine_class=doc.get("engine_class"),
@@ -55,6 +61,7 @@ class StrategyConfig:
             "params": self.params,
             "enabled": self.enabled,
             "user_id": self.user_id,
+            "securities_account_id": self.securities_account_id,
             "engine": self.engine,
             # engine_class might be None, so handle it
             "engine_class": self.engine_class,
@@ -171,7 +178,8 @@ class MultiStrategyOrchestrator:
                     )
                     continue
                 
-                key = f"{config.user_id}_{config.symbol}_{config.strategy_key}"
+                account_key = config.securities_account_id or "no_account"
+                key = f"{config.user_id}_{account_key}_{config.symbol}_{config.strategy_key}"
                 new_configs[key] = config
                 
                 # self.log.info(
@@ -257,7 +265,10 @@ class MultiStrategyOrchestrator:
                 return
             
             # Resolve account params
-            account_params = self._resolve_account_params(config.user_id)
+            account_params = self._resolve_account_params(
+                config.user_id,
+                config.securities_account_id,
+            )
             
             # Build worker config
             worker_config = {
@@ -326,12 +337,28 @@ class MultiStrategyOrchestrator:
         except Exception as e:
             self.log.error(f"Error stopping worker {key}: {e}", exc_info=True)
     
-    def _resolve_account_params(self, user_id: Optional[str]) -> Dict[str, Any]:
-        """Resolve securities account for user."""
+    def _resolve_account_params(
+        self,
+        user_id: Optional[str],
+        securities_account_id: Optional[str],
+    ) -> Dict[str, Any]:
+        """Resolve explicitly configured securities account for a worker."""
         account_params = {}
-        if user_id:
+        if user_id and securities_account_id:
             try:
-                acct_doc = self.db["securities_accounts"].find_one({"user_id": user_id})
+                query_ids = [securities_account_id]
+                try:
+                    query_ids.insert(0, ObjectId(securities_account_id))
+                except (InvalidId, TypeError):
+                    pass
+
+                acct_doc = None
+                for query_id in query_ids:
+                    acct_doc = self.db["securities_accounts"].find_one(
+                        {"_id": query_id, "user_id": user_id}
+                    )
+                    if acct_doc:
+                        break
                 if acct_doc:
                     account_params = {
                         "securities_account_id": str(acct_doc.get("_id")),
@@ -339,7 +366,13 @@ class MultiStrategyOrchestrator:
                         "account_id": acct_doc.get("account_id"),
                     }
             except Exception as e:
-                self.log.error(f"Failed to load account for user {user_id}: {e}")
+                self.log.error(f"Failed to load account {securities_account_id} for user {user_id}: {e}")
+        elif user_id:
+            self.log.warning(
+                "Strategy config for user %s has no securities_account_id; "
+                "worker will start without account binding",
+                user_id,
+            )
         return account_params
     
     def start_all(self):
