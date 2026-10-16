@@ -14,10 +14,13 @@ WORKDIR /app/data-access-lib
 RUN pip install --no-cache-dir --prefix=/install -e .
 
 # 2. Install vnpy-live-trading
+# ta-lib 上界：0.8.2 只发了 cp315 的 wheel，cp39 上 pip 会回落到 sdist，而编译它
+# 需要 ta-lib 的 C 头文件 —— 这个镜像里没有 ⇒ 构建失败（2026-10-16 实测）。
+# 0.8.1 是最后一个带 cp39/cp310 manylinux wheel 的版本，上游恢复 wheel 后可以撤掉。
 WORKDIR /app
 COPY vnpy-live-trading/ /app/vnpy-live-trading/
 WORKDIR /app/vnpy-live-trading
-RUN pip install --no-cache-dir --prefix=/install -e .
+RUN pip install --no-cache-dir --prefix=/install -e . "ta-lib<0.8.2"
 
 # 3. Install quant-strategy-manager
 WORKDIR /app
