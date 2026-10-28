@@ -15,6 +15,7 @@ class StrategyRegistry:
     # Strategy key -> Engine class path mapping
     _VNPY_STRATEGIES: Dict[str, str] = {
         "hidden_dragon": "scripts.single_stream_hidden_dragon.SingleStreamRealTimeEngine",
+        "sma_cross": "scripts.single_stream_sma_cross.SingleStreamRealTimeEngine",
         "turtle": "scripts.single_stream_turtle.SingleStreamRealTimeEngine",
         "single_yang": "scripts.single_stream_single_yang.SingleStreamRealTimeEngine",
         "grid": "scripts.single_stream_grid.SingleStreamRealTimeEngine",
