@@ -39,6 +39,13 @@ jobs:
           path: data-access-lib
           token: ${{ secrets.DEPENDENCY_REPO_TOKEN }}
 
+      - name: Checkout strategy-cores
+        uses: actions/checkout@v4
+        with:
+          repository: blueenergy/strategy-cores
+          path: strategy-cores
+          token: ${{ secrets.DEPENDENCY_REPO_TOKEN }}
+
       - name: Checkout vnpy-live-trading
         uses: actions/checkout@v4
         with:
@@ -93,6 +100,13 @@ jobs:
         with:
           repository: blueenergy/data-access-lib
           path: data-access-lib
+          token: ${{ secrets.DEPENDENCY_REPO_TOKEN }}
+
+      - name: Checkout strategy-cores
+        uses: actions/checkout@v4
+        with:
+          repository: blueenergy/strategy-cores
+          path: strategy-cores
           token: ${{ secrets.DEPENDENCY_REPO_TOKEN }}
 
       - name: Checkout vnpy-live-trading
