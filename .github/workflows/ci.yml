@@ -72,10 +72,14 @@ jobs:
           pip install -e .[test] || pip install pytest
 
       - name: Run tests
+        # No `|| echo` here on purpose: swallowing the exit code made a red
+        # suite report green, and one of the listed files (test_user_filtering)
+        # did not even exist -- pytest errored, the echo hid it, and the build
+        # passed for months. Tests either pass or the run fails.
         working-directory: quant-strategy-manager
         run: |
           export PYTHONPATH=$(pwd)/src
-          pytest --maxfail=1 --disable-warnings -v test_config_loader.py test_user_filtering.py || echo "No tests found or tests failed, continuing for now"
+          pytest --maxfail=1 --disable-warnings -v test_*.py
 
   docker-build:
     name: Build & Push Docker image (ghcr.io + ACR)
