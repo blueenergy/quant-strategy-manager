@@ -1,5 +1,5 @@
 # Stage 1: Build all Python packages
-FROM python:3.9-slim AS builder
+FROM python:3.10-slim AS builder
 
 WORKDIR /app
 
@@ -36,7 +36,7 @@ COPY quant-strategy-manager/src ./src
 RUN pip install --no-cache-dir --prefix=/install -e ".[api]"
 
 # Stage 2: Runtime image (no build tools)
-FROM python:3.9-slim
+FROM python:3.10-slim
 
 WORKDIR /app
 
