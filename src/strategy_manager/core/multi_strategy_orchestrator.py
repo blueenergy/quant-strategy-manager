@@ -368,11 +368,41 @@ class MultiStrategyOrchestrator:
             except Exception as e:
                 self.log.error(f"Failed to load account {securities_account_id} for user {user_id}: {e}")
         elif user_id:
-            self.log.warning(
-                "Strategy config for user %s has no securities_account_id; "
-                "worker will start without account binding",
-                user_id,
-            )
+            # No explicit account: fall back to the user's single account.
+            # A user with exactly one securities_accounts row gets it bound
+            # automatically; zero or several leaves the worker signal-only.
+            try:
+                accounts = list(self.db["securities_accounts"].find({"user_id": user_id}))
+            except Exception as e:  # noqa: BLE001 - bindings must not kill the worker
+                self.log.error(f"Failed to list accounts for user {user_id}: {e}")
+                accounts = []
+
+            if len(accounts) == 1:
+                acct_doc = accounts[0]
+                account_params = {
+                    "securities_account_id": str(acct_doc.get("_id")),
+                    "broker": acct_doc.get("broker"),
+                    "account_id": acct_doc.get("account_id"),
+                }
+                self.log.info(
+                    "Strategy config for user %s has no securities_account_id; "
+                    "auto-bound the only account %s",
+                    user_id,
+                    acct_doc.get("account_id"),
+                )
+            elif not accounts:
+                self.log.warning(
+                    "Strategy config for user %s has no securities_account_id and the user "
+                    "has no securities account; worker will run signal-only (no live orders)",
+                    user_id,
+                )
+            else:
+                self.log.warning(
+                    "Strategy config for user %s has no securities_account_id and the user has "
+                    "%d accounts; cannot pick a default, worker will run signal-only",
+                    user_id,
+                    len(accounts),
+                )
         return account_params
     
     def start_all(self):

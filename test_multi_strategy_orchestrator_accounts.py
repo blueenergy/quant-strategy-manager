@@ -79,12 +79,36 @@ def test_resolve_account_params_uses_selected_account():
     }
 
 
-def test_resolve_account_params_without_account_does_not_fallback():
+def test_resolve_account_params_auto_binds_single_account():
+    """A user with exactly one account gets it bound without an explicit id."""
+    account = ObjectId()
+    orchestrator = _orchestrator_with_accounts(
+        [
+            {"_id": account, "user_id": "user-1", "broker": "BrokerA", "account_id": "A"},
+        ]
+    )
+
+    assert orchestrator._resolve_account_params("user-1", None) == {
+        "securities_account_id": str(account),
+        "broker": "BrokerA",
+        "account_id": "A",
+    }
+
+
+def test_resolve_account_params_multiple_accounts_do_not_guess():
+    """Several accounts cannot be disambiguated: the worker stays signal-only."""
     orchestrator = _orchestrator_with_accounts(
         [
             {"_id": ObjectId(), "user_id": "user-1", "broker": "BrokerA", "account_id": "A"},
+            {"_id": ObjectId(), "user_id": "user-1", "broker": "BrokerB", "account_id": "B"},
         ]
     )
+
+    assert orchestrator._resolve_account_params("user-1", None) == {}
+
+
+def test_resolve_account_params_no_accounts_stays_signal_only():
+    orchestrator = _orchestrator_with_accounts([])
 
     assert orchestrator._resolve_account_params("user-1", None) == {}
 

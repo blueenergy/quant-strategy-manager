@@ -64,6 +64,12 @@ class VnpyWorkerAdapter(StrategyWorker):
         
         self.params = params
         self.warmup_days = warmup_days
+        # Resolved binding (explicit or auto-bound by the orchestrator). None
+        # means the worker is signal-only: it writes trade_signals that are
+        # marked is_executable=False and no trader will pick up.
+        self.securities_account_id = securities_account_id
+        self.broker = broker
+        self.account_id = account_id
         
         # Import vnpy engine class dynamically
         module_path, class_name = engine_class_path.rsplit(".", 1)
@@ -291,6 +297,8 @@ class VnpyWorkerAdapter(StrategyWorker):
             "engine": "vnpy",
             "state": self._state.value,
             "bars_processed": self.bars_processed,
+            "securities_account_id": self.securities_account_id,
+            "account_bound": bool(self.securities_account_id),
         }
         
         # Get strategy-specific stats if available
