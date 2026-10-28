@@ -232,6 +232,17 @@ class VnpyWorkerAdapter(StrategyWorker):
             self.log.warning("⚠️ vnpy engine does not have a logger attribute")
         
         self.bars_processed = 0
+
+        # The base engine counts bars locally inside poll_latest_minute_data,
+        # so wrap on_bar to expose a counter through get_stats().
+        if hasattr(self.engine, "on_bar"):
+            inner_on_bar = self.engine.on_bar
+
+            def counting_on_bar(bar, _inner=inner_on_bar):
+                self.bars_processed += 1
+                return _inner(bar)
+
+            self.engine.on_bar = counting_on_bar
     
     def run(self):
         """Main thread loop - start vnpy engine."""
