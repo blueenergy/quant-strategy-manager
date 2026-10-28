@@ -63,6 +63,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ../data-access-lib
+          # vnpy-live-trading's live shell imports strategy_cores at module load,
+          # so both the tests and the app need it. The checkout exists for the
+          # image build; install it here too or every shell test fails at import.
+          pip install -e ../strategy-cores
           # Cap ta-lib below 0.8.2: that release ships cp315 wheels only, so pip
           # falls back to the sdist on 3.10 and fails -- compiling it needs the
           # ta-lib C headers, which nothing here installs. 0.8.1 is the last
