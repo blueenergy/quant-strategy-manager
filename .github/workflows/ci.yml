@@ -69,7 +69,10 @@ jobs:
           # release with cp39/cp310 manylinux wheels; drop the cap when upstream
           # ships them again.
           pip install -e ../vnpy-live-trading "ta-lib<0.8.2"
-          pip install -e .[test] || pip install pytest
+          # The extra is named `dev`, not `test`; asking for a missing extra is a
+          # warning, not an error, so `.[test]` silently installed nothing and
+          # the old `|| pip install pytest` fallback never ran.
+          pip install -e . pytest
 
       - name: Run tests
         # No `|| echo` here on purpose: swallowing the exit code made a red
