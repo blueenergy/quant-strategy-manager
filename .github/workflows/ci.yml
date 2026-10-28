@@ -84,6 +84,18 @@ jobs:
           export PYTHONPATH=$(pwd)/src
           pytest --maxfail=1 --disable-warnings -v test_*.py
 
+      - name: Run vnpy-live-trading tests
+        # vnpy-live-trading has no CI of its own, and its code only ships inside
+        # this image, so this is the right gate: if the live shell is broken the
+        # image should not be built. It runs here because the deps (vnpy,
+        # pymongo, strategy-cores) are already installed by the steps above.
+        working-directory: vnpy-live-trading
+        run: |
+          python -m unittest \
+            tests.test_single_stream_base_engine \
+            tests.test_single_stream_hidden_dragon \
+            tests.test_single_stream_daily
+
   docker-build:
     name: Build & Push Docker image (ghcr.io + ACR)
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
