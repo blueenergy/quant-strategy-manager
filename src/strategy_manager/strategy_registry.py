@@ -27,6 +27,8 @@ class StrategyRegistry:
         "turtle_daily": "scripts.single_stream_turtle_daily.SingleStreamRealTimeEngine",
         "single_yang": "scripts.single_stream_single_yang.SingleStreamRealTimeEngine",
         "grid": "scripts.single_stream_grid.SingleStreamRealTimeEngine",
+        "index_enhanced_turtle": "scripts.single_stream_index_enhanced_turtle.SingleStreamRealTimeEngine",
+        "index_enhanced_grid": "scripts.single_stream_index_enhanced_grid.SingleStreamRealTimeEngine",
         # Only register strategies whose engine module actually exists.
         # turtle / single_yang / grid used to be listed here without an
         # implementation, so configuring one failed at worker startup.
