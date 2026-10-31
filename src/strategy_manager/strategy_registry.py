@@ -17,6 +17,7 @@ class StrategyRegistry:
         "hidden_dragon": "scripts.single_stream_hidden_dragon.SingleStreamRealTimeEngine",
         "sma_cross": "scripts.single_stream_sma_cross.SingleStreamRealTimeEngine",
         "daily_sma_cross": "scripts.single_stream_daily_sma_cross.SingleStreamRealTimeEngine",
+        "boll": "scripts.single_stream_boll.SingleStreamRealTimeEngine",
         # Only register strategies whose engine module actually exists.
         # turtle / single_yang / grid used to be listed here without an
         # implementation, so configuring one failed at worker startup.
