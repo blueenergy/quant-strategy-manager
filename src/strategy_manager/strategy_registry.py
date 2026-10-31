@@ -23,6 +23,7 @@ class StrategyRegistry:
         "momentum_reversal": "scripts.single_stream_momentum_reversal.SingleStreamRealTimeEngine",
         "atr_breakout": "scripts.single_stream_atr_breakout.SingleStreamRealTimeEngine",
         "volume_mfi_breakout": "scripts.single_stream_volume_mfi_breakout.SingleStreamRealTimeEngine",
+        "turtle": "scripts.single_stream_turtle.SingleStreamRealTimeEngine",
         # Only register strategies whose engine module actually exists.
         # turtle / single_yang / grid used to be listed here without an
         # implementation, so configuring one failed at worker startup.
