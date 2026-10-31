@@ -109,9 +109,11 @@ jobs:
     # lost 3h36m to one that stalled after the build had finished, and a
     # stalled job here blocks release (needs: below) the same way. That stall was
     # the ACR leg, which is back in this job now as a direct push, so the timeout
-    # guards both legs. A healthy cold build is ~10 min and a warm one ~2, so 20
-    # fails fast without false alarms.
-    timeout-minutes: 20
+    # guards both legs. A healthy cold build is ~10 min and a warm one ~2.
+    # On a slow ACR relay day the layer copy alone can exceed 20 minutes and
+    # the job is cancelled -- which skips the bump and leaves the old image
+    # live (2026-10-31: two runs died this way). 50 gives the relay room.
+    timeout-minutes: 50
     steps:
       - name: Checkout quant-strategy-manager
         uses: actions/checkout@v4
