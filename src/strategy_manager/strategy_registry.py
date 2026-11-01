@@ -27,6 +27,7 @@ class StrategyRegistry:
         "turtle_daily": "scripts.single_stream_turtle_daily.SingleStreamRealTimeEngine",
         "single_yang": "scripts.single_stream_single_yang.SingleStreamRealTimeEngine",
         "grid": "scripts.single_stream_grid.SingleStreamRealTimeEngine",
+        "grid_minute": "scripts.single_stream_grid_minute.SingleStreamRealTimeEngine",
         "index_enhanced_turtle": "scripts.single_stream_index_enhanced_turtle.SingleStreamRealTimeEngine",
         "index_enhanced_grid": "scripts.single_stream_index_enhanced_grid.SingleStreamRealTimeEngine",
         "exit_monitor": "scripts.single_stream_exit_monitor.SingleStreamRealTimeEngine",
