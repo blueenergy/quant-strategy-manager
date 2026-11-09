@@ -143,6 +143,10 @@ class MultiStrategyOrchestrator:
         # Control
         self._stop_event = threading.Event()
         self._monitor_thread: Optional[threading.Thread] = None
+        # Serializes the monitor's sync against out-of-band stops (the API
+        # server's position-reset endpoint stops a worker before zeroing its
+        # state file).
+        self._sync_lock = threading.Lock()
         
         self.log.info(
             f"Orchestrator initialized | db={self.mongo_db} collection={self.config_collection}"
@@ -199,11 +203,15 @@ class MultiStrategyOrchestrator:
     
     def sync_workers(self, new_configs: Optional[Dict[str, StrategyConfig]] = None):
         """Synchronize workers with current configurations.
-        
+
         Args:
             new_configs: Optional new configuration dict. If None, uses existing self.configurations
                          (but that won't trigger restarts for modified configs).
         """
+        with self._sync_lock:
+            self._sync_workers(new_configs)
+
+    def _sync_workers(self, new_configs: Optional[Dict[str, StrategyConfig]] = None):
         if new_configs is None:
             new_configs = self.configurations
             
@@ -254,7 +262,19 @@ class MultiStrategyOrchestrator:
             f"Worker sync complete | running={len(self.workers)} "
             f"stopped={len(to_stop)} restarted={len(to_restart)} started={len(to_start)}"
         )
-    
+
+    def stop_worker_now(self, key: str) -> bool:
+        """Stop one worker synchronously while holding the sync lock.
+
+        The disable/reset flow uses this so the worker's final ``save_state``
+        lands before its state file is zeroed.
+        """
+        with self._sync_lock:
+            if key not in self.workers:
+                return False
+            self._stop_worker(key)
+            return True
+
     def _start_worker(self, key: str, config: StrategyConfig):
         """Start a worker for the given configuration."""
         try:
@@ -452,10 +472,10 @@ class MultiStrategyOrchestrator:
         if self._monitor_thread:
             self._monitor_thread.join(timeout=5)
         
-        worker_keys = list(self.workers.keys())
-        for key in worker_keys:
-            self._stop_worker(key)
-        
+        with self._sync_lock:
+            for key in list(self.workers.keys()):
+                self._stop_worker(key)
+
         self.log.info("All workers stopped")
     
     def get_status(self) -> Dict[str, Any]:

@@ -1,4 +1,5 @@
 import sys
+import threading
 from pathlib import Path
 
 from bson import ObjectId
@@ -143,3 +144,39 @@ def test_load_configurations_keys_include_account_id():
         "user-1_acct-a_000001.SZ_demo",
         "user-1_acct-b_000001.SZ_demo",
     }
+
+
+class _Worker:
+    def __init__(self):
+        self.stopped = False
+        self.joined = False
+
+    def stop(self, save_state=True):
+        self.stopped = save_state
+
+    def join(self, timeout=None):
+        self.joined = True
+
+
+def _orchestrator_with_workers(workers):
+    orchestrator = MultiStrategyOrchestrator.__new__(MultiStrategyOrchestrator)
+    orchestrator.workers = dict(workers)
+    orchestrator._sync_lock = threading.Lock()
+    orchestrator.log = _Log()
+    return orchestrator
+
+
+def test_stop_worker_now_returns_false_when_absent():
+    orchestrator = _orchestrator_with_workers({})
+
+    assert orchestrator.stop_worker_now("missing") is False
+
+
+def test_stop_worker_now_stops_with_state_and_removes_worker():
+    worker = _Worker()
+    orchestrator = _orchestrator_with_workers({"k": worker})
+
+    assert orchestrator.stop_worker_now("k") is True
+    assert worker.stopped is True
+    assert worker.joined is True
+    assert "k" not in orchestrator.workers

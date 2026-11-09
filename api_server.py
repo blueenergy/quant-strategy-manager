@@ -56,6 +56,17 @@ except ImportError as e:
         return {"id": "anonymous", "username": "anonymous"}
 
 from strategy_manager.core import MultiStrategyOrchestrator
+from strategy_manager.core.position_guard import (
+    DEFAULT_STATE_DIR,
+    build_reset_state,
+    market_session,
+    read_state,
+    resolve_account,
+    resolve_managed_position,
+    strategy_capabilities,
+    summarize_pending_signals,
+    write_state,
+)
 from strategy_manager.adapters.vnpy_adapter import create_vnpy_worker
 
 app = FastAPI(
@@ -71,6 +82,20 @@ orchestrator = None
 def get_user_id(current_user: dict) -> str:
     """统一获取用户唯一标识（主键 _id），并转换为字符串"""
     return str(current_user["id"])
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return default
 
 
 def get_public_host():
@@ -333,6 +358,208 @@ async def get_worker_log_file(worker_key: str, current_user: dict = Depends(get_
         media_type="text/plain",
         filename=f"{worker_key}.log"
     )
+
+
+@app.get("/api/configs/position-guard")
+async def get_position_guard_config(
+    symbol: str,
+    strategy_key: str,
+    current_user: dict = Depends(get_current_active_user),
+) -> Dict[str, Any]:
+    """Return the position a strategy manages, without starting a worker.
+
+    Read-only. Used by the disable flow so a strategy is not stopped while it
+    still holds shares nobody else will manage.
+    """
+    orch = get_orchestrator()
+    db = orch.db
+    user_id = get_user_id(current_user)
+    config = orch.config_coll.find_one(
+        {"user_id": user_id, "symbol": symbol, "strategy_key": strategy_key}
+    )
+    if not config:
+        raise HTTPException(status_code=404, detail="strategy config not found")
+
+    params = config.get("params") or {}
+    capabilities = strategy_capabilities(strategy_key)
+    account = resolve_account(db, user_id, config)
+    account_payload = {
+        "bound": account is not None,
+        "securities_account_id": str(account.get("_id")) if account else None,
+        "account_id": account.get("account_id") if account else None,
+        "broker": account.get("broker") if account else None,
+    }
+
+    position_doc = None
+    if account:
+        position_doc = db["trader_positions"].find_one(
+            {"symbol": symbol, "securities_account_id": str(account["_id"])},
+            sort=[("updated_at", -1)],
+        )
+    broker_qty = _safe_int(
+        (position_doc or {}).get("qty") or (position_doc or {}).get("volume") or 0
+    )
+    if position_doc and "can_use_volume" in position_doc:
+        can_use = _safe_int(position_doc.get("can_use_volume"))
+    else:
+        can_use = broker_qty
+
+    state_prefix = params.get("state_prefix") or "single_stream"
+    state_dir = params.get("state_dir") or DEFAULT_STATE_DIR
+    state_data = read_state(state_dir, symbol, state_prefix)
+    state_pos: Optional[int] = None
+    if state_data is not None and state_data.get("pos") is not None:
+        state_pos = _safe_int(state_data.get("pos"))
+
+    resolution = resolve_managed_position(
+        capabilities=capabilities,
+        broker_qty=broker_qty,
+        managed_shares=_safe_int(params.get("managed_shares")),
+        core_shares=_safe_int(params.get("core_shares")),
+        state_pos=state_pos,
+    )
+    managed_qty = resolution.get("managed_qty")
+    pending = summarize_pending_signals(
+        db, user_id, account_payload["securities_account_id"], symbol
+    )
+
+    pending_sell_qty = _safe_int((pending.get("sell") or {}).get("qty"))
+    clear_qty: Optional[int] = None
+    if managed_qty is not None:
+        clear_qty = max(0, min(max(0, managed_qty - pending_sell_qty), max(0, can_use)))
+    can_auto_clear = bool(
+        managed_qty is not None
+        and clear_qty is not None
+        and clear_qty > 0
+        and resolution.get("source") != "unknown"
+    )
+
+    source = str(resolution.get("source") or "unknown")
+    warnings: list[str] = []
+    if not account:
+        warnings.append("该策略未绑定证券账户，只产生观察信号，不会下单")
+    if source == "unknown":
+        warnings.append("无法自动确认该策略的独立持仓，请人工核对后再决定")
+    if source == "state_file":
+        warnings.append(f"持仓量来自 state 文件（{managed_qty} 股）；该策略不接管券商持仓")
+    if source == "state_file_missing":
+        if broker_qty > 0:
+            warnings.append(f"state 文件无持仓记录；券商 {broker_qty} 股不被该策略管理")
+        else:
+            warnings.append("state 文件无持仓记录")
+    if source == "broker_sleeve" and _safe_int(resolution.get("core_qty")) > 0:
+        warnings.append(
+            f"core_shares={_safe_int(params.get('core_shares'))} 为底仓，"
+            f"清仓只会卖出策略管理的 {managed_qty} 股"
+        )
+    if source == "broker_position" and broker_qty > 0 and managed_qty == broker_qty:
+        warnings.append(f"managed_shares=0：停止后账户全部 {broker_qty} 股将无人管理")
+    if source == "broker_sync_position" and managed_qty:
+        warnings.append("该策略按券商持仓同步；停止后这些持仓将无人管理")
+    if managed_qty is not None and managed_qty > broker_qty:
+        warnings.append(
+            f"state 显示 {managed_qty} 股，但券商快照只有 {broker_qty} 股；可能已人工卖出"
+        )
+    if source == "state_file" and managed_qty is not None and broker_qty > managed_qty:
+        warnings.append(
+            f"券商持仓 {broker_qty} 股，其中 {broker_qty - managed_qty} 股不在该策略管理范围内"
+        )
+    if _safe_int((pending.get("buy") or {}).get("count")):
+        warnings.append(
+            f"有 {_safe_int((pending.get('buy') or {}).get('count'))} 笔在途买单"
+            f"（{_safe_int((pending.get('buy') or {}).get('qty'))} 股），停止后仍可能成交"
+        )
+    if pending_sell_qty:
+        warnings.append(f"已有 {pending_sell_qty} 股在途卖单，清仓只会补足差额")
+    if managed_qty is not None and can_use < managed_qty:
+        warnings.append(
+            f"今日可卖 {can_use} 股，剩余 {managed_qty - can_use} 股受 T+1 限制"
+        )
+
+    return {
+        "ok": True,
+        "symbol": symbol,
+        "strategy_key": strategy_key,
+        "strategy_name": capabilities.get("name") or strategy_key,
+        "enabled": bool(config.get("enabled", True)),
+        "account": account_payload,
+        "position": {
+            "source": source,
+            "broker_qty": broker_qty,
+            "can_use_volume": can_use,
+            "managed_qty": managed_qty,
+            "core_qty": resolution.get("core_qty"),
+            "avg_price": _safe_float((position_doc or {}).get("avg_price")),
+            "last_price": _safe_float((position_doc or {}).get("last_price")),
+            "market_value": _safe_float((position_doc or {}).get("market_value")),
+            "unrealized_pnl": _safe_float((position_doc or {}).get("unrealized_pnl")),
+            "unrealized_pnl_pct": _safe_float((position_doc or {}).get("unrealized_pnl_pct")),
+            "entry_price": _safe_float((state_data or {}).get("entry_price")),
+            "entry_date": (state_data or {}).get("entry_date"),
+            "snapshot_at": (position_doc or {}).get("updated_at"),
+        },
+        "pending": pending,
+        "session": market_session(),
+        "can_auto_clear": can_auto_clear,
+        "clear_qty": clear_qty,
+        "warnings": warnings,
+    }
+
+
+@app.post("/api/configs/reset-position")
+async def reset_position_state(
+    symbol: str,
+    strategy_key: str,
+    current_user: dict = Depends(get_current_active_user),
+) -> Dict[str, Any]:
+    """Zero a stopped strategy's state file after its position was cleared.
+
+    The worker, if still alive, is stopped first so its final ``save_state``
+    cannot overwrite the reset. The config must already be disabled.
+    """
+    orch = get_orchestrator()
+    user_id = get_user_id(current_user)
+    config = orch.config_coll.find_one(
+        {"user_id": user_id, "symbol": symbol, "strategy_key": strategy_key}
+    )
+    if not config:
+        raise HTTPException(status_code=404, detail="strategy config not found")
+    if bool(config.get("enabled", True)):
+        raise HTTPException(
+            status_code=409,
+            detail="stop the strategy before resetting its state",
+        )
+
+    params = config.get("params") or {}
+    account_key = (
+        config.get("securities_account_id")
+        or params.get("securities_account_id")
+        or "no_account"
+    )
+    worker_key = f"{user_id}_{account_key}_{symbol}_{strategy_key}"
+    stopped = orch.stop_worker_now(worker_key)
+
+    state_dir = params.get("state_dir") or DEFAULT_STATE_DIR
+    state_prefix = params.get("state_prefix") or "single_stream"
+    state = read_state(state_dir, symbol, state_prefix)
+    if state is None:
+        return {
+            "ok": True,
+            "reset": False,
+            "reason": "no_state_file",
+            "worker_stopped": stopped,
+        }
+
+    pos_before = _safe_int(state.get("pos"))
+    path = write_state(state_dir, symbol, state_prefix, build_reset_state(state))
+    return {
+        "ok": True,
+        "reset": True,
+        "pos_before": pos_before,
+        "pos_after": 0,
+        "worker_stopped": stopped,
+        "state_path": str(path),
+    }
 
 
 @app.get("/api/status")
