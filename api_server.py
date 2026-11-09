@@ -16,6 +16,7 @@ load_dotenv()  # 默认加载当前目录的 .env
 load_dotenv('config/.env')  # 也加载 config 目录下的 .env
 
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, FileResponse, PlainTextResponse
 from typing import Dict, Any, Optional
 import sys
@@ -212,8 +213,8 @@ async def list_workers(current_user: dict = Depends(get_current_active_user)) ->
     
     logger.info(f"User {current_user.get('username')} ({user_id}) requesting workers")
     
-    # 只返回属于当前用户的 workers
-    for key, worker in orch.workers.items():
+    # 只返回属于当前用户的 workers（snapshot 避免与 sync/reload 并发迭代）
+    for key, worker in orch.snapshot_workers().items():
         config = orch.configurations.get(key)
         
         if config:
@@ -537,7 +538,9 @@ async def reset_position_state(
         or "no_account"
     )
     worker_key = f"{user_id}_{account_key}_{symbol}_{strategy_key}"
-    stopped = orch.stop_worker_now(worker_key)
+    # stop_worker_now joins the worker thread (up to 5s); keep it off the event
+    # loop so concurrent guard/worker reads stay responsive.
+    stopped = await run_in_threadpool(orch.stop_worker_now, worker_key)
 
     state_dir = params.get("state_dir") or DEFAULT_STATE_DIR
     state_prefix = params.get("state_prefix") or "single_stream"
@@ -562,14 +565,29 @@ async def reset_position_state(
     }
 
 
+@app.post("/api/reload")
+async def reload_configs(
+    current_user: dict = Depends(get_current_active_user),
+) -> Dict[str, Any]:
+    """Re-read ``watchlist_strategies`` and start/stop workers immediately.
+
+    Idempotent; any authenticated user can trigger a sync. The 60-second
+    monitor thread remains the fallback if this call is missed.
+    """
+    orch = get_orchestrator()
+    result = await run_in_threadpool(orch.reload_now)
+    return {"ok": True, **(result or {})}
+
+
 @app.get("/api/status")
 async def get_status() -> Dict[str, Any]:
     """获取 orchestrator 整体状态"""
     orch = get_orchestrator()
+    workers = orch.snapshot_workers()
     return {
-        "total_workers": len(orch.workers),
+        "total_workers": len(workers),
         "active_configs": len(orch.configurations),
-        "worker_keys": list(orch.workers.keys())
+        "worker_keys": list(workers.keys())
     }
 
 

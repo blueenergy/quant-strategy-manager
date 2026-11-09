@@ -209,7 +209,12 @@ class MultiStrategyOrchestrator:
                          (but that won't trigger restarts for modified configs).
         """
         with self._sync_lock:
-            self._sync_workers(new_configs)
+            return self._sync_workers(new_configs)
+
+    def reload_now(self) -> Dict[str, Any]:
+        """Re-read configs and sync workers immediately (API reload endpoint)."""
+        with self._sync_lock:
+            return self._sync_workers(self.load_configurations())
 
     def _sync_workers(self, new_configs: Optional[Dict[str, StrategyConfig]] = None):
         if new_configs is None:
@@ -262,6 +267,18 @@ class MultiStrategyOrchestrator:
             f"Worker sync complete | running={len(self.workers)} "
             f"stopped={len(to_stop)} restarted={len(to_restart)} started={len(to_start)}"
         )
+        return {
+            "running": len(self.workers),
+            "active_configs": len(self.configurations),
+            "stopped": len(to_stop),
+            "restarted": len(to_restart),
+            "started": len(to_start),
+        }
+
+    def snapshot_workers(self) -> Dict[str, StrategyWorker]:
+        """Copy the worker map under the sync lock for API reads."""
+        with self._sync_lock:
+            return dict(self.workers)
 
     def stop_worker_now(self, key: str) -> bool:
         """Stop one worker synchronously while holding the sync lock.

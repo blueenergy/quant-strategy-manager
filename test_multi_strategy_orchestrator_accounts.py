@@ -180,3 +180,36 @@ def test_stop_worker_now_stops_with_state_and_removes_worker():
     assert worker.stopped is True
     assert worker.joined is True
     assert "k" not in orchestrator.workers
+
+
+def test_snapshot_workers_returns_a_copy():
+    worker = _Worker()
+    orchestrator = _orchestrator_with_workers({"k": worker})
+
+    snapshot = orchestrator.snapshot_workers()
+    snapshot["added"] = "not-in-orchestrator"
+
+    assert snapshot["k"] is worker
+    assert "added" not in orchestrator.workers
+
+
+def test_reload_now_passes_fresh_configs_to_sync():
+    orchestrator = MultiStrategyOrchestrator.__new__(MultiStrategyOrchestrator)
+    orchestrator._sync_lock = threading.Lock()
+    calls = []
+    orchestrator.load_configurations = lambda: {"k": "cfg"}
+    orchestrator._sync_workers = lambda configs: (
+        calls.append(configs)
+        or {
+            "running": 1,
+            "active_configs": 1,
+            "stopped": 0,
+            "restarted": 0,
+            "started": 1,
+        }
+    )
+
+    result = orchestrator.reload_now()
+
+    assert calls == [{"k": "cfg"}]
+    assert result["started"] == 1
